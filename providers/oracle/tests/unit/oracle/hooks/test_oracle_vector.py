@@ -22,7 +22,7 @@ from unittest import mock
 import pytest
 
 from airflow.providers.oracle.hooks.oracle_vector import OracleVectorDocument, OracleVectorHook
-from airflow.providers.oracle.utils.vector import OracleJsonFilterBuilder, quote_identifier
+from airflow.providers.oracle.vector import OracleJsonFilterBuilder, quote_identifier
 
 
 class FakeCursor:
