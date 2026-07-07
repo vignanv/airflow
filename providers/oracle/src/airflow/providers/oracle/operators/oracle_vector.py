@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from airflow.models import BaseOperator
 from airflow.providers.oracle.hooks.oracle_vector import OracleVectorDocument, OracleVectorHook
-from airflow.providers.oracle.utils.vector import OracleVectorDistance, OracleVectorIndexType
+from airflow.providers.oracle.vector import OracleVectorDistance, OracleVectorIndexType
 
 if TYPE_CHECKING:
     from airflow.utils.context import Context
