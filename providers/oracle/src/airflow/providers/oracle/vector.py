@@ -176,7 +176,7 @@ def validate_positive_int(name: str, value: int | None, *, minimum: int = 1, max
 
 
 class OracleJsonFilterBuilder:
-    """Translate a small Mongo/LangChain-like metadata filter into Oracle SQL.
+    """Translate supported JSON metadata filters into Oracle SQL predicates.
 
     The generated SQL always uses bind variables for values. Only JSON field
     names and operators are interpreted, and field names are strictly validated.
