@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from airflow.models import BaseOperator
 from airflow.providers.oracle.hooks.oracle_vector import OracleVectorDocument, OracleVectorHook
-from airflow.providers.oracle.vector import OracleVectorDistance, OracleVectorIndexType
+from airflow.providers.oracle.vector import OracleVectorDistance, OracleVectorFormat, OracleVectorIndexType
 
 if TYPE_CHECKING:
     from airflow.utils.context import Context
@@ -45,6 +45,7 @@ class OracleCreateVectorTableOperator(BaseOperator):
         text_column: str = "text",
         metadata_column: str = "metadata",
         embedding_column: str = "embedding",
+        embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
         if_not_exists: bool = True,
         overwrite: bool = False,
         **kwargs: Any,
@@ -57,6 +58,7 @@ class OracleCreateVectorTableOperator(BaseOperator):
         self.text_column = text_column
         self.metadata_column = metadata_column
         self.embedding_column = embedding_column
+        self.embedding_format = embedding_format
         self.if_not_exists = if_not_exists
         self.overwrite = overwrite
 
@@ -69,6 +71,7 @@ class OracleCreateVectorTableOperator(BaseOperator):
             text_column=self.text_column,
             metadata_column=self.metadata_column,
             embedding_column=self.embedding_column,
+            embedding_format=self.embedding_format,
             if_not_exists=self.if_not_exists,
             overwrite=self.overwrite,
         )

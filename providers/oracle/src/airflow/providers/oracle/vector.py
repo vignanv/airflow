@@ -43,6 +43,16 @@ class OracleVectorIndexType(str, Enum):
     IVF = "IVF"
 
 
+class OracleVectorFormat(str, Enum):
+    """Supported Oracle VECTOR storage formats."""
+
+    INT8 = "INT8"
+    FLOAT32 = "FLOAT32"
+    FLOAT64 = "FLOAT64"
+    BINARY = "BINARY"
+    FLEXIBLE = "*"
+
+
 def quote_identifier(identifier: str, *, allow_schema: bool = False) -> str:
     """Return a safely quoted Oracle identifier.
 
@@ -88,6 +98,17 @@ def normalize_index_type(index_type: OracleVectorIndexType | str) -> OracleVecto
     except ValueError as exc:
         allowed = ", ".join(item.value for item in OracleVectorIndexType)
         raise ValueError(f"Unsupported Oracle vector index type {index_type!r}. Expected one of: {allowed}") from exc
+
+
+def normalize_vector_format(vector_format: OracleVectorFormat | str) -> OracleVectorFormat:
+    """Normalize a user supplied vector storage format."""
+    if isinstance(vector_format, OracleVectorFormat):
+        return vector_format
+    try:
+        return OracleVectorFormat(str(vector_format).upper())
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in OracleVectorFormat)
+        raise ValueError(f"Unsupported Oracle vector format {vector_format!r}. Expected one of: {allowed}") from exc
 
 
 def vector_to_list(value: Any) -> list[float]:
