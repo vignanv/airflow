@@ -22,7 +22,7 @@ from unittest import mock
 import pytest
 
 from airflow.providers.oracle.hooks.oracle_vector import OracleVectorDocument, OracleVectorHook
-from airflow.providers.oracle.vector import OracleJsonFilterBuilder, quote_identifier
+from airflow.providers.oracle.vector import OracleJsonFilterBuilder, OracleVectorFormat, quote_identifier
 
 
 class FakeCursor:
@@ -107,6 +107,37 @@ def test_create_vector_table_emits_expected_ddl():
     assert '"DOCS"' in sql
     assert '"EMBEDDING" VECTOR(3, FLOAT32) NOT NULL' in sql
     assert '"METADATA" JSON' in sql
+
+
+@pytest.mark.parametrize(
+    ("embedding_format", "expected"),
+    [
+        ("int8", "INT8"),
+        (OracleVectorFormat.FLOAT64, "FLOAT64"),
+        (OracleVectorFormat.BINARY, "BINARY"),
+        (OracleVectorFormat.FLEXIBLE, "*"),
+    ],
+)
+def test_create_vector_table_accepts_supported_embedding_formats(embedding_format, expected):
+    hook = RecordingOracleVectorHook()
+    hook.create_vector_table(
+        table_name="docs",
+        embedding_dimension=3,
+        embedding_format=embedding_format,
+        if_not_exists=False,
+    )
+    assert f'"EMBEDDING" VECTOR(3, {expected}) NOT NULL' in hook.statements[-1]
+
+
+def test_create_vector_table_rejects_unsupported_embedding_format():
+    hook = RecordingOracleVectorHook()
+    with pytest.raises(ValueError, match="Unsupported Oracle vector format"):
+        hook.create_vector_table(
+            table_name="docs",
+            embedding_dimension=3,
+            embedding_format="FLOAT16",
+            if_not_exists=False,
+        )
 
 
 def test_create_vector_table_rejects_overwrite_and_if_not_exists():
