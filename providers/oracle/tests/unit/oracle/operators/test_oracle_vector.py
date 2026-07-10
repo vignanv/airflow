@@ -29,11 +29,17 @@ from airflow.providers.oracle.operators.oracle_vector import (
     OracleDeleteVectorDocumentsOperator,
     OracleVectorSearchOperator,
 )
+from airflow.providers.oracle.vector import OracleVectorFormat
 
 
 @mock.patch("airflow.providers.oracle.operators.oracle_vector.OracleVectorHook")
 def test_create_vector_table_operator_calls_hook(mock_hook_class):
-    op = OracleCreateVectorTableOperator(task_id="t", table_name="docs", embedding_dimension=3)
+    op = OracleCreateVectorTableOperator(
+        task_id="t",
+        table_name="docs",
+        embedding_dimension=3,
+        embedding_format=OracleVectorFormat.INT8,
+    )
     op.execute({})
     mock_hook_class.return_value.create_vector_table.assert_called_once_with(
         table_name="docs",
@@ -42,6 +48,7 @@ def test_create_vector_table_operator_calls_hook(mock_hook_class):
         text_column="text",
         metadata_column="metadata",
         embedding_column="embedding",
+        embedding_format=OracleVectorFormat.INT8,
         if_not_exists=True,
         overwrite=False,
     )

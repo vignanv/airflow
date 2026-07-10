@@ -34,12 +34,14 @@ from airflow.providers.oracle.hooks.oracle import OracleHook
 from airflow.providers.oracle.vector import (
     OracleJsonFilterBuilder,
     OracleVectorDistance,
+    OracleVectorFormat,
     OracleVectorIndexType,
     coerce_json_dict,
     ensure_json_serializable,
     materialize_iterable,
     normalize_distance,
     normalize_index_type,
+    normalize_vector_format,
     quote_identifier,
     require_equal_lengths,
     validate_positive_int,
@@ -121,11 +123,13 @@ class OracleVectorHook(OracleHook):
         text_column: str = "text",
         metadata_column: str = "metadata",
         embedding_column: str = "embedding",
+        embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
         if_not_exists: bool = True,
         overwrite: bool = False,
     ) -> None:
         """Create an Oracle vector table."""
         validate_positive_int("embedding_dimension", embedding_dimension)
+        embedding_format = normalize_vector_format(embedding_format)
         if overwrite and if_not_exists:
             raise ValueError("overwrite=True cannot be combined with if_not_exists=True")
         if overwrite:
@@ -139,14 +143,12 @@ class OracleVectorHook(OracleHook):
         text_sql = quote_identifier(text_column)
         metadata_sql = quote_identifier(metadata_column)
         embedding_sql = quote_identifier(embedding_column)
-        sql = f"""
-CREATE TABLE {table_sql} (
-    {id_sql} VARCHAR2(512) PRIMARY KEY,
-    {text_sql} CLOB NOT NULL,
-    {metadata_sql} JSON,
-    {embedding_sql} VECTOR({embedding_dimension}, FLOAT32) NOT NULL
-)
-"""
+        sql = f"""CREATE TABLE {table_sql} (
+            {id_sql} VARCHAR2(512) PRIMARY KEY,
+            {text_sql} CLOB NOT NULL,
+            {metadata_sql} JSON,
+            {embedding_sql} VECTOR({embedding_dimension}, {embedding_format.value}) NOT NULL
+        )"""
         self.run(sql)
 
     def drop_vector_table(self, *, table_name: str, purge: bool = False, if_exists: bool = True) -> None:
