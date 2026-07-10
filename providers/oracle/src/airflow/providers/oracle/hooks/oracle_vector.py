@@ -547,23 +547,23 @@ FETCH FIRST :k ROWS ONLY
         embedding_sql = quote_identifier(embedding_column)
         if mutate_on_duplicate:
             return f"""
-MERGE INTO {table_sql} tgt
-USING (
-    SELECT :id AS id_value, :text AS text_value, :metadata AS metadata_value, :embedding AS embedding_value
-    FROM dual
-) src
-ON (tgt.{id_sql} = src.id_value)
-WHEN MATCHED THEN UPDATE SET
-    tgt.{text_sql} = src.text_value,
-    tgt.{metadata_sql} = src.metadata_value,
-    tgt.{embedding_sql} = src.embedding_value
-WHEN NOT MATCHED THEN INSERT ({id_sql}, {text_sql}, {metadata_sql}, {embedding_sql})
-VALUES (src.id_value, src.text_value, src.metadata_value, src.embedding_value)
-"""
+                MERGE INTO {table_sql} tgt
+                USING (
+                    SELECT :id AS id_value, :text AS text_value, :metadata AS metadata_value, :embedding AS embedding_value
+                    FROM dual
+                ) src
+                ON (tgt.{id_sql} = src.id_value)
+                WHEN MATCHED THEN UPDATE SET
+                    tgt.{text_sql} = src.text_value,
+                    tgt.{metadata_sql} = src.metadata_value,
+                    tgt.{embedding_sql} = src.embedding_value
+                WHEN NOT MATCHED THEN INSERT ({id_sql}, {text_sql}, {metadata_sql}, {embedding_sql})
+                VALUES (src.id_value, src.text_value, src.metadata_value, src.embedding_value)
+            """
         return f"""
-INSERT INTO {table_sql} ({id_sql}, {text_sql}, {metadata_sql}, {embedding_sql})
-VALUES (:id, :text, :metadata, :embedding)
-"""
+            INSERT INTO {table_sql} ({id_sql}, {text_sql}, {metadata_sql}, {embedding_sql})
+            VALUES (:id, :text, :metadata, :embedding)
+        """
 
     def _execute_rows(self, sql: str, rows: Sequence[Mapping[str, Any]], *, batch_size: int) -> int:
         if not rows:
