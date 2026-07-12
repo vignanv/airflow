@@ -360,12 +360,12 @@ class OracleVectorHook(OracleHook):
         if include_embedding:
             select_columns.append(embedding_sql)
         sql = f"""
-SELECT {', '.join(select_columns)}
-FROM {table_sql}
-{where_sql}
-ORDER BY {score_sql}
-FETCH FIRST :k ROWS ONLY
-"""
+            SELECT {', '.join(select_columns)}
+            FROM {table_sql}
+            {where_sql}
+            ORDER BY {score_sql}
+            FETCH FIRST :k ROWS ONLY
+        """
         binds = {"query_embedding": vector_to_list(embedding), "k": int(k), **filter_binds}
         with self.get_conn() as conn:
             with conn.cursor() as cursor:
