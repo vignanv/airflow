@@ -25,6 +25,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from enum import Enum
 from typing import Any
 
+import oracledb
+
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
 
 
@@ -70,11 +72,12 @@ def quote_identifier(identifier: str, *, allow_schema: bool = False) -> str:
     if len(parts) > 2 or (len(parts) == 2 and not allow_schema):
         raise ValueError(f"Invalid identifier: {identifier!r}")
 
+    enquote_name = getattr(oracledb, "enquote_name", None)
     quoted: list[str] = []
     for part in parts:
         if not _IDENTIFIER_RE.fullmatch(part):
             raise ValueError(f"Unsafe Oracle identifier: {identifier!r}")
-        quoted.append('"' + part.upper() + '"')
+        quoted.append(enquote_name(part) if enquote_name else '"' + part.upper() + '"')
     return ".".join(quoted)
 
 
