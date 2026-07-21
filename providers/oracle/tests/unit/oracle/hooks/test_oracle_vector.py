@@ -21,6 +21,7 @@ from unittest import mock
 
 import pytest
 
+from airflow.providers.oracle import vector
 from airflow.providers.oracle.hooks.oracle_vector import OracleVectorDocument, OracleVectorHook
 from airflow.providers.oracle.vector import OracleJsonFilterBuilder, OracleVectorFormat, quote_identifier
 
@@ -88,9 +89,19 @@ class RecordingOracleVectorHook(OracleVectorHook):
         return self.first_rows.pop(0) if self.first_rows else None
 
 
-def test_quote_identifier_accepts_safe_names():
+@mock.patch.object(vector.oracledb, "enquote_name", new=None, create=True)
+def test_quote_identifier_uses_legacy_quoting_when_driver_helper_is_unavailable():
     assert quote_identifier("docs") == '"DOCS"'
     assert quote_identifier("my_schema.docs", allow_schema=True) == '"MY_SCHEMA"."DOCS"'
+
+
+@mock.patch.object(vector.oracledb, "enquote_name", create=True)
+def test_quote_identifier_uses_driver_quoting_helper(enquote_name):
+    enquote_name.side_effect = lambda part: f'"{part.upper()}"'
+
+    assert quote_identifier("docs") == '"DOCS"'
+    assert quote_identifier("my_schema.docs", allow_schema=True) == '"MY_SCHEMA"."DOCS"'
+    assert enquote_name.call_args_list == [mock.call("docs"), mock.call("my_schema"), mock.call("docs")]
 
 
 @mock.patch.object(OracleVectorHook, "get_conn")
