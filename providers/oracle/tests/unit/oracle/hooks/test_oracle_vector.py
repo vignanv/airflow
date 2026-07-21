@@ -236,7 +236,7 @@ def test_add_texts_mutate_on_duplicate_uses_merge(monkeypatch):
 
 
 def test_similarity_search_by_vector_emits_vector_distance_and_binds(monkeypatch):
-    cursor = FakeCursor(rows=[("d1", "hello", '{"source":"unit"}', 0.1)])
+    cursor = FakeCursor(rows=[("d1", "hello", {"source": "unit"}, 0.1)])
     conn = FakeConnection(cursor)
     hook = RecordingOracleVectorHook()
     monkeypatch.setattr(hook, "get_conn", lambda: conn)
@@ -250,6 +250,7 @@ def test_similarity_search_by_vector_emits_vector_distance_and_binds(monkeypatch
     )
     assert "VECTOR_DISTANCE" in cursor.sql
     assert "COSINE" in cursor.sql
+    assert "JSON_SERIALIZE" not in cursor.sql
     assert cursor.binds["query_embedding"] == [1.0, 2.0, 3.0]
     assert cursor.binds["k"] == 1
     assert results[0].id == "d1"
@@ -258,13 +259,15 @@ def test_similarity_search_by_vector_emits_vector_distance_and_binds(monkeypatch
 
 
 def test_get_by_ids_can_include_embedding(monkeypatch):
-    cursor = FakeCursor(rows=[("d1", "hello", '{"source":"unit"}', [1, 2, 3])])
+    cursor = FakeCursor(rows=[("d1", "hello", {"source": "unit"}, [1, 2, 3])])
     conn = FakeConnection(cursor)
     hook = RecordingOracleVectorHook()
     monkeypatch.setattr(hook, "get_conn", lambda: conn)
     results = hook.get_by_ids(table_name="docs", ids=["d1"], include_embedding=True)
     assert "IN (:id_0)" in cursor.sql
+    assert "JSON_SERIALIZE" not in cursor.sql
     assert cursor.binds == {"id_0": "d1"}
+    assert results[0].metadata == {"source": "unit"}
     assert results[0].embedding == [1.0, 2.0, 3.0]
 
 
