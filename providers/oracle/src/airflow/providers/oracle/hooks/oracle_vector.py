@@ -457,10 +457,8 @@ class OracleVectorHook(OracleHook):
 
     def drop_vector_index(self, *, index_name: str, if_exists: bool = True) -> None:
         """Drop a vector index."""
-        if if_exists and not self.vector_index_exists(index_name=index_name):
-            self.log.info("Vector index %s does not exist; skipping drop", index_name)
-            return
-        self.run(f"DROP INDEX {quote_identifier(index_name)}")
+        if_exists_sql = " IF EXISTS" if if_exists else ""
+        self.run(f"DROP INDEX{if_exists_sql} {quote_identifier(index_name)}")
 
     def vector_index_exists(self, *, index_name: str, table_name: str | None = None) -> bool:
         """Return True when an index exists."""
