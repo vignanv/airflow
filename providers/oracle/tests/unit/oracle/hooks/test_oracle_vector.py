@@ -317,6 +317,21 @@ def test_create_ivf_index_emits_ddl():
     assert "neighbor partitions 10" in sql
 
 
+@pytest.mark.parametrize(
+    ("if_exists", "expected"),
+    [
+        (True, 'DROP INDEX IF EXISTS "DOCS_HNSW_IDX"'),
+        (False, 'DROP INDEX "DOCS_HNSW_IDX"'),
+    ],
+)
+def test_drop_vector_index_uses_conditional_ddl(if_exists, expected):
+    hook = RecordingOracleVectorHook()
+
+    hook.drop_vector_index(index_name="docs_hnsw_idx", if_exists=if_exists)
+
+    assert hook.statements == [expected]
+
+
 def test_create_index_validates_parameter_combinations():
     hook = RecordingOracleVectorHook()
     with pytest.raises(ValueError):
