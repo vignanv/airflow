@@ -128,17 +128,17 @@ class OracleVectorHook(OracleHook):
         if overwrite:
             self.drop_vector_table(table_name=table_name, if_exists=True)
 
-        table_sql = quote_identifier(table_name, allow_schema=True)
-        id_sql = quote_identifier(id_column)
-        text_sql = quote_identifier(text_column)
-        metadata_sql = quote_identifier(metadata_column)
-        embedding_sql = quote_identifier(embedding_column)
+        quoted_table_name = quote_identifier(table_name, allow_schema=True)
+        quoted_id_column = quote_identifier(id_column)
+        quoted_text_column = quote_identifier(text_column)
+        quoted_metadata_column = quote_identifier(metadata_column)
+        quoted_embedding_column = quote_identifier(embedding_column)
         if_not_exists_sql = " IF NOT EXISTS" if if_not_exists else ""
-        sql = f"""CREATE TABLE{if_not_exists_sql} {table_sql} (
-            {id_sql} VARCHAR2(512) PRIMARY KEY,
-            {text_sql} CLOB NOT NULL,
-            {metadata_sql} JSON,
-            {embedding_sql} VECTOR({embedding_dimension}, {embedding_format.value}) NOT NULL
+        sql = f"""CREATE TABLE{if_not_exists_sql} {quoted_table_name} (
+            {quoted_id_column} VARCHAR2(512) PRIMARY KEY,
+            {quoted_text_column} CLOB NOT NULL,
+            {quoted_metadata_column} JSON,
+            {quoted_embedding_column} VECTOR({embedding_dimension}, {embedding_format.value}) NOT NULL
         )"""
         self.run(sql)
 
@@ -264,10 +264,10 @@ class OracleVectorHook(OracleHook):
         """Delete documents by id and return row count."""
         if not ids:
             return 0
-        table_sql = quote_identifier(table_name, allow_schema=True)
-        id_sql = quote_identifier(id_column)
+        quoted_table_name = quote_identifier(table_name, allow_schema=True)
+        quoted_id_column = quote_identifier(id_column)
         rows = [{"id": str(item)} for item in ids]
-        sql = f"DELETE FROM {table_sql} WHERE {id_sql} = :id"
+        sql = f"DELETE FROM {quoted_table_name} WHERE {quoted_id_column} = :id"
         return self._execute_rows(sql, rows, batch_size=1000)
 
     def get_by_ids(
@@ -284,17 +284,24 @@ class OracleVectorHook(OracleHook):
         """Fetch documents by id."""
         if not ids:
             return []
-        table_sql = quote_identifier(table_name, allow_schema=True)
-        id_sql = quote_identifier(id_column)
-        text_sql = quote_identifier(text_column)
-        metadata_sql = quote_identifier(metadata_column)
-        embedding_sql = quote_identifier(embedding_column)
+        quoted_table_name = quote_identifier(table_name, allow_schema=True)
+        quoted_id_column = quote_identifier(id_column)
+        quoted_text_column = quote_identifier(text_column)
+        quoted_metadata_column = quote_identifier(metadata_column)
+        quoted_embedding_column = quote_identifier(embedding_column)
         placeholders = ", ".join(f":id_{i}" for i in range(len(ids)))
         binds = {f"id_{i}": str(value) for i, value in enumerate(ids)}
-        select_columns = [id_sql, text_sql, f"JSON_SERIALIZE({metadata_sql} RETURNING CLOB) AS metadata_json"]
+        select_columns = [
+            quoted_id_column,
+            quoted_text_column,
+            f"JSON_SERIALIZE({quoted_metadata_column} RETURNING CLOB) AS metadata_json",
+        ]
         if include_embedding:
-            select_columns.append(embedding_sql)
-        sql = f"SELECT {', '.join(select_columns)} FROM {table_sql} WHERE {id_sql} IN ({placeholders})"
+            select_columns.append(quoted_embedding_column)
+        sql = (
+            f"SELECT {', '.join(select_columns)} FROM {quoted_table_name} "
+            f"WHERE {quoted_id_column} IN ({placeholders})"
+        )
         with self.get_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, binds)
@@ -322,23 +329,27 @@ class OracleVectorHook(OracleHook):
         """Run Oracle VECTOR_DISTANCE search by query vector."""
         validate_positive_int("k", k)
         distance = normalize_distance(distance)
-        table_sql = quote_identifier(table_name, allow_schema=True)
-        id_sql = quote_identifier(id_column)
-        text_sql = quote_identifier(text_column)
-        metadata_sql = quote_identifier(metadata_column)
-        embedding_sql = quote_identifier(embedding_column)
-        filter_builder = OracleJsonFilterBuilder(metadata_sql)
+        quoted_table_name = quote_identifier(table_name, allow_schema=True)
+        quoted_id_column = quote_identifier(id_column)
+        quoted_text_column = quote_identifier(text_column)
+        quoted_metadata_column = quote_identifier(metadata_column)
+        quoted_embedding_column = quote_identifier(embedding_column)
+        filter_builder = OracleJsonFilterBuilder(quoted_metadata_column)
         where_clause, filter_binds = filter_builder.build(filter)
         where_sql = f"WHERE {where_clause}" if where_clause else ""
-        score_sql = f"VECTOR_DISTANCE({embedding_sql}, :query_embedding, {distance.value})"
-        select_columns = [id_sql, text_sql, f"JSON_SERIALIZE({metadata_sql} RETURNING CLOB) AS metadata_json"]
+        score_sql = f"VECTOR_DISTANCE({quoted_embedding_column}, :query_embedding, {distance.value})"
+        select_columns = [
+            quoted_id_column,
+            quoted_text_column,
+            f"JSON_SERIALIZE({quoted_metadata_column} RETURNING CLOB) AS metadata_json",
+        ]
         if include_score:
             select_columns.append(f"{score_sql} AS distance")
         if include_embedding:
-            select_columns.append(embedding_sql)
+            select_columns.append(quoted_embedding_column)
         sql = f"""
             SELECT {', '.join(select_columns)}
-            FROM {table_sql}
+            FROM {quoted_table_name}
             {where_sql}
             ORDER BY {score_sql}
             FETCH FIRST :k ROWS ONLY
@@ -432,10 +443,10 @@ class OracleVectorHook(OracleHook):
         if index_type == OracleVectorIndexType.IVF and (neighbors is not None or ef_construction is not None):
             raise ValueError("neighbors and ef_construction are only valid for HNSW indexes")
 
-        index_sql = quote_identifier(index_name)
-        table_sql = quote_identifier(table_name, allow_schema=True)
-        embedding_sql = quote_identifier(embedding_column)
-        parts = [f"CREATE VECTOR INDEX {index_sql} ON {table_sql} ({embedding_sql})"]
+        quoted_index_name = quote_identifier(index_name)
+        quoted_table_name = quote_identifier(table_name, allow_schema=True)
+        quoted_embedding_column = quote_identifier(embedding_column)
+        parts = [f"CREATE VECTOR INDEX {quoted_index_name} ON {quoted_table_name} ({quoted_embedding_column})"]
         if index_type == OracleVectorIndexType.HNSW:
             parts.append("ORGANIZATION INMEMORY NEIGHBOR GRAPH")
         else:
@@ -515,28 +526,32 @@ class OracleVectorHook(OracleHook):
         embedding_column: str,
         mutate_on_duplicate: bool,
     ) -> str:
-        table_sql = quote_identifier(table_name, allow_schema=True)
-        id_sql = quote_identifier(id_column)
-        text_sql = quote_identifier(text_column)
-        metadata_sql = quote_identifier(metadata_column)
-        embedding_sql = quote_identifier(embedding_column)
+        quoted_table_name = quote_identifier(table_name, allow_schema=True)
+        quoted_id_column = quote_identifier(id_column)
+        quoted_text_column = quote_identifier(text_column)
+        quoted_metadata_column = quote_identifier(metadata_column)
+        quoted_embedding_column = quote_identifier(embedding_column)
         if mutate_on_duplicate:
             return f"""
-                MERGE INTO {table_sql} tgt
+                MERGE INTO {quoted_table_name} tgt
                 USING (
                     SELECT :id AS id_value, :text AS text_value, :metadata AS metadata_value, :embedding AS embedding_value
                     FROM dual
                 ) src
-                ON (tgt.{id_sql} = src.id_value)
+                ON (tgt.{quoted_id_column} = src.id_value)
                 WHEN MATCHED THEN UPDATE SET
-                    tgt.{text_sql} = src.text_value,
-                    tgt.{metadata_sql} = src.metadata_value,
-                    tgt.{embedding_sql} = src.embedding_value
-                WHEN NOT MATCHED THEN INSERT ({id_sql}, {text_sql}, {metadata_sql}, {embedding_sql})
+                    tgt.{quoted_text_column} = src.text_value,
+                    tgt.{quoted_metadata_column} = src.metadata_value,
+                    tgt.{quoted_embedding_column} = src.embedding_value
+                WHEN NOT MATCHED THEN INSERT (
+                    {quoted_id_column}, {quoted_text_column}, {quoted_metadata_column}, {quoted_embedding_column}
+                )
                 VALUES (src.id_value, src.text_value, src.metadata_value, src.embedding_value)
             """
         return f"""
-            INSERT INTO {table_sql} ({id_sql}, {text_sql}, {metadata_sql}, {embedding_sql})
+            INSERT INTO {quoted_table_name} (
+                {quoted_id_column}, {quoted_text_column}, {quoted_metadata_column}, {quoted_embedding_column}
+            )
             VALUES (:id, :text, :metadata, :embedding)
         """
 
