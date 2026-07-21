@@ -116,6 +116,39 @@ def test_create_vector_table_emits_expected_ddl():
     assert '"METADATA" JSON' in sql
 
 
+def test_create_vector_table_uses_if_not_exists_by_default():
+    hook = RecordingOracleVectorHook()
+
+    hook.create_vector_table(table_name="docs", embedding_dimension=3)
+
+    assert hook.statements[-1].startswith('CREATE TABLE IF NOT EXISTS "DOCS"')
+
+
+@pytest.mark.parametrize(
+    ("purge", "if_exists", "expected"),
+    [
+        (False, True, 'DROP TABLE IF EXISTS "DOCS"'),
+        (True, True, 'DROP TABLE IF EXISTS "DOCS" PURGE'),
+        (False, False, 'DROP TABLE "DOCS"'),
+    ],
+)
+def test_drop_vector_table_uses_conditional_ddl(purge, if_exists, expected):
+    hook = RecordingOracleVectorHook()
+
+    hook.drop_vector_table(table_name="docs", purge=purge, if_exists=if_exists)
+
+    assert hook.statements == [expected]
+
+
+def test_create_vector_table_overwrites_with_conditional_drop():
+    hook = RecordingOracleVectorHook()
+
+    hook.create_vector_table(table_name="docs", embedding_dimension=3, overwrite=True, if_not_exists=False)
+
+    assert hook.statements[0] == 'DROP TABLE IF EXISTS "DOCS"'
+    assert hook.statements[1].startswith('CREATE TABLE "DOCS"')
+
+
 @pytest.mark.parametrize(
     ("embedding_format", "expected"),
     [

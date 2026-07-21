@@ -127,16 +127,14 @@ class OracleVectorHook(OracleHook):
             raise ValueError("overwrite=True cannot be combined with if_not_exists=True")
         if overwrite:
             self.drop_vector_table(table_name=table_name, if_exists=True)
-        elif if_not_exists and self.vector_table_exists(table_name=table_name):
-            self.log.info("Vector table %s already exists; skipping creation", table_name)
-            return
 
         table_sql = quote_identifier(table_name, allow_schema=True)
         id_sql = quote_identifier(id_column)
         text_sql = quote_identifier(text_column)
         metadata_sql = quote_identifier(metadata_column)
         embedding_sql = quote_identifier(embedding_column)
-        sql = f"""CREATE TABLE {table_sql} (
+        if_not_exists_sql = " IF NOT EXISTS" if if_not_exists else ""
+        sql = f"""CREATE TABLE{if_not_exists_sql} {table_sql} (
             {id_sql} VARCHAR2(512) PRIMARY KEY,
             {text_sql} CLOB NOT NULL,
             {metadata_sql} JSON,
@@ -146,23 +144,9 @@ class OracleVectorHook(OracleHook):
 
     def drop_vector_table(self, *, table_name: str, purge: bool = False, if_exists: bool = True) -> None:
         """Drop an Oracle vector table."""
-        if if_exists and not self.vector_table_exists(table_name=table_name):
-            self.log.info("Vector table %s does not exist; skipping drop", table_name)
-            return
+        if_exists_sql = " IF EXISTS" if if_exists else ""
         suffix = " PURGE" if purge else ""
-        self.run(f"DROP TABLE {quote_identifier(table_name, allow_schema=True)}{suffix}")
-
-    def vector_table_exists(self, *, table_name: str) -> bool:
-        """Return True when the table exists in the current schema or supplied schema."""
-        owner, name = self._split_object_name(table_name)
-        if owner:
-            sql = "SELECT 1 FROM ALL_TABLES WHERE OWNER = :owner AND TABLE_NAME = :name"
-            params = {"owner": owner.upper(), "name": name.upper()}
-        else:
-            sql = "SELECT 1 FROM USER_TABLES WHERE TABLE_NAME = :name"
-            params = {"name": name.upper()}
-        row = self.get_first(sql, parameters=params)
-        return row is not None
+        self.run(f"DROP TABLE{if_exists_sql} {quote_identifier(table_name, allow_schema=True)}{suffix}")
 
     # ------------------------------------------------------------------
     # Ingestion and retrieval
