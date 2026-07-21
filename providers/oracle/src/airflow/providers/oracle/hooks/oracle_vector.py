@@ -294,7 +294,7 @@ class OracleVectorHook(OracleHook):
         select_columns = [
             quoted_id_column,
             quoted_text_column,
-            f"JSON_SERIALIZE({quoted_metadata_column} RETURNING CLOB) AS metadata_json",
+            quoted_metadata_column,
         ]
         if include_embedding:
             select_columns.append(quoted_embedding_column)
@@ -341,7 +341,7 @@ class OracleVectorHook(OracleHook):
         select_columns = [
             quoted_id_column,
             quoted_text_column,
-            f"JSON_SERIALIZE({quoted_metadata_column} RETURNING CLOB) AS metadata_json",
+            quoted_metadata_column,
         ]
         if include_score:
             select_columns.append(f"{score_sql} AS distance")
