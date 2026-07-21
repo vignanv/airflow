@@ -93,6 +93,13 @@ def test_quote_identifier_accepts_safe_names():
     assert quote_identifier("my_schema.docs", allow_schema=True) == '"MY_SCHEMA"."DOCS"'
 
 
+@mock.patch.object(OracleVectorHook, "get_conn")
+def test_get_database_version_parses_connection_version(mock_get_conn):
+    mock_get_conn.return_value = FakeConnection(FakeCursor())
+
+    assert RecordingOracleVectorHook().get_database_version() == (23, 4, 0, 0, 0)
+
+
 @pytest.mark.parametrize("identifier", ["docs;drop table x", "docs where 1=1", "1docs", "docs--", "schema.table.extra"])
 def test_quote_identifier_rejects_unsafe_names(identifier):
     with pytest.raises(ValueError):
