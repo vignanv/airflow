@@ -93,14 +93,7 @@ class OracleVectorHook(OracleHook):
     # ------------------------------------------------------------------
     def get_database_version(self) -> tuple[int, ...]:
         """Return the connected Oracle database version as a tuple of ints."""
-        conn = self.get_conn()
-        version = getattr(conn, "version", None)
-        if version is None:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT version_full FROM product_component_version WHERE product LIKE 'Oracle Database%'")
-                row = cursor.fetchone()
-                version = row[0] if row else "0"
-        return tuple(int(part) for part in str(version).split(".") if part.isdigit())
+        return tuple(int(part) for part in self.get_conn().version.split(".") if part.isdigit())
 
     def check_vector_support(self, *, minimum_version: tuple[int, int] = (23, 4)) -> None:
         """Raise AirflowException if the database version is too old for VECTOR support."""
