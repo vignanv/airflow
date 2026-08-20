@@ -79,7 +79,6 @@ class RecordingOracleVectorHook(OracleVectorHook):
     def __init__(self):
         self.statements = []
         self.first_rows = []
-        self.log = mock.Mock()
 
     def run(self, sql, *args, **kwargs):
         self.statements.append(sql)
