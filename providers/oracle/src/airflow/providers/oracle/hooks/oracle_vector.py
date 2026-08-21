@@ -45,6 +45,7 @@ from airflow.providers.oracle.vector import (
     quote_identifier,
     require_equal_lengths,
     validate_positive_int,
+    vector_to_bind_value,
     vector_to_list,
 )
 
@@ -163,6 +164,7 @@ class OracleVectorHook(OracleHook):
         text_column: str = "text",
         metadata_column: str = "metadata",
         embedding_column: str = "embedding",
+        embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
         batch_size: int = 1000,
         mutate_on_duplicate: bool = False,
         embedding_provider_config: dict[str, Any] | None = None,
@@ -173,6 +175,7 @@ class OracleVectorHook(OracleHook):
         embedding_list = materialize_iterable("embeddings", embeddings)
         metadata_list = materialize_iterable("metadatas", metadatas)
         id_list = materialize_iterable("ids", ids)
+        embedding_format = normalize_vector_format(embedding_format)
 
         if embedding_provider_config is not None:
             raise NotImplementedError(
@@ -193,7 +196,7 @@ class OracleVectorHook(OracleHook):
                 "id": str(id_list[i]),
                 "text": str(text_list[i]),
                 "metadata": ensure_json_serializable(metadata_list[i]),
-                "embedding": vector_to_list(embedding_list[i]),
+                "embedding": vector_to_bind_value(embedding_list[i], embedding_format),
             }
             for i in range(count)
         ]
@@ -208,6 +211,7 @@ class OracleVectorHook(OracleHook):
             ),
             rows,
             batch_size=batch_size,
+            use_executemany=False,
         )
         return [str(item) for item in id_list]
 
@@ -220,6 +224,7 @@ class OracleVectorHook(OracleHook):
         text_column: str = "text",
         metadata_column: str = "metadata",
         embedding_column: str = "embedding",
+        embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
         batch_size: int = 1000,
         mutate_on_duplicate: bool = False,
         embedding_provider_config: dict[str, Any] | None = None,
@@ -255,6 +260,7 @@ class OracleVectorHook(OracleHook):
             text_column=text_column,
             metadata_column=metadata_column,
             embedding_column=embedding_column,
+            embedding_format=embedding_format,
             batch_size=batch_size,
             mutate_on_duplicate=mutate_on_duplicate,
             embedding_provider_config=embedding_provider_config,
@@ -306,7 +312,9 @@ class OracleVectorHook(OracleHook):
             with conn.cursor() as cursor:
                 cursor.execute(sql, binds)
                 rows = cursor.fetchall()
-        return [self._row_to_result(row, include_score=False, include_embedding=include_embedding) for row in rows]
+                return [
+                    self._row_to_result(row, include_score=False, include_embedding=include_embedding) for row in rows
+                ]
 
     # ------------------------------------------------------------------
     # Search
@@ -323,6 +331,7 @@ class OracleVectorHook(OracleHook):
         text_column: str = "text",
         metadata_column: str = "metadata",
         embedding_column: str = "embedding",
+        embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
         include_score: bool = False,
         include_embedding: bool = False,
     ) -> list[OracleVectorSearchResult]:
@@ -354,15 +363,19 @@ class OracleVectorHook(OracleHook):
             ORDER BY {score_sql}
             FETCH FIRST :k ROWS ONLY
         """
-        binds = {"query_embedding": vector_to_list(embedding), "k": int(k), **filter_binds}
+        binds = {
+            "query_embedding": vector_to_bind_value(embedding, embedding_format),
+            "k": int(k),
+            **filter_binds,
+        }
         with self.get_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, binds)
                 rows = cursor.fetchall()
-        return [
-            self._row_to_result(row, include_score=include_score, include_embedding=include_embedding)
-            for row in rows
-        ]
+                return [
+                    self._row_to_result(row, include_score=include_score, include_embedding=include_embedding)
+                    for row in rows
+                ]
 
     def similarity_search(
         self,
@@ -378,6 +391,7 @@ class OracleVectorHook(OracleHook):
         text_column: str = "text",
         metadata_column: str = "metadata",
         embedding_column: str = "embedding",
+        embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
         include_score: bool = False,
         include_embedding: bool = False,
     ) -> list[OracleVectorSearchResult]:
@@ -405,6 +419,7 @@ class OracleVectorHook(OracleHook):
             text_column=text_column,
             metadata_column=metadata_column,
             embedding_column=embedding_column,
+            embedding_format=embedding_format,
             include_score=include_score,
             include_embedding=include_embedding,
         )
@@ -555,7 +570,14 @@ class OracleVectorHook(OracleHook):
             VALUES (:id, :text, :metadata, :embedding)
         """
 
-    def _execute_rows(self, sql: str, rows: Sequence[Mapping[str, Any]], *, batch_size: int) -> int:
+    def _execute_rows(
+        self,
+        sql: str,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        batch_size: int,
+        use_executemany: bool = True,
+    ) -> int:
         if not rows:
             return 0
         total = 0
@@ -563,11 +585,16 @@ class OracleVectorHook(OracleHook):
             with conn.cursor() as cursor:
                 for start in range(0, len(rows), batch_size):
                     batch = list(rows[start : start + batch_size])
-                    cursor.executemany(sql, batch)
-                    if cursor.rowcount and cursor.rowcount > 0:
-                        total += cursor.rowcount
+                    if use_executemany:
+                        cursor.executemany(sql, batch)
+                        if cursor.rowcount and cursor.rowcount > 0:
+                            total += cursor.rowcount
+                        else:
+                            total += len(batch)
                     else:
-                        total += len(batch)
+                        for row in batch:
+                            cursor.execute(sql, row)
+                            total += 1
             conn.commit()
         return total
 

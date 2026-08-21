@@ -61,9 +61,21 @@ def test_add_documents_operator_calls_hook(mock_hook_class):
         task_id="t",
         table_name="docs",
         documents=[{"id": "d1", "text": "hello", "embedding": [1, 2, 3]}],
+        embedding_format=OracleVectorFormat.FLOAT64,
     )
     assert op.execute({}) == ["d1"]
-    mock_hook_class.return_value.add_documents.assert_called_once()
+    mock_hook_class.return_value.add_documents.assert_called_once_with(
+        table_name="docs",
+        documents=[{"id": "d1", "text": "hello", "embedding": [1, 2, 3]}],
+        id_column="id",
+        text_column="text",
+        metadata_column="metadata",
+        embedding_column="embedding",
+        embedding_format=OracleVectorFormat.FLOAT64,
+        batch_size=1000,
+        mutate_on_duplicate=False,
+        embedding_provider_config=None,
+    )
 
 
 def test_add_documents_operator_requires_source():
@@ -76,10 +88,29 @@ def test_search_operator_returns_serializable_results(mock_hook_class):
     mock_hook_class.return_value.similarity_search_by_vector.return_value = [
         OracleVectorSearchResult(id="d1", text="hello", metadata={"source": "unit"}, distance=0.1)
     ]
-    op = OracleVectorSearchOperator(task_id="t", table_name="docs", embedding=[1, 2, 3])
+    op = OracleVectorSearchOperator(
+        task_id="t",
+        table_name="docs",
+        embedding=[1, 2, 3],
+        embedding_format=OracleVectorFormat.FLOAT64,
+    )
     assert op.execute({}) == [
         {"id": "d1", "text": "hello", "metadata": {"source": "unit"}, "distance": 0.1, "embedding": None}
     ]
+    mock_hook_class.return_value.similarity_search_by_vector.assert_called_once_with(
+        table_name="docs",
+        embedding=[1, 2, 3],
+        k=4,
+        distance=mock.ANY,
+        filter=None,
+        id_column="id",
+        text_column="text",
+        metadata_column="metadata",
+        embedding_column="embedding",
+        embedding_format=OracleVectorFormat.FLOAT64,
+        include_score=True,
+        include_embedding=False,
+    )
 
 
 @mock.patch("airflow.providers.oracle.operators.oracle_vector.OracleVectorHook")
