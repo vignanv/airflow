@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from array import array
 from unittest import mock
 
 import pytest
@@ -31,6 +32,7 @@ class FakeCursor:
         self.rows = rows or []
         self.sql = None
         self.binds = None
+        self.executed_rows = []
         self.executed_batches = []
         self.rowcount = 0
 
@@ -43,6 +45,7 @@ class FakeCursor:
     def execute(self, sql, binds=None):
         self.sql = sql
         self.binds = binds or {}
+        self.executed_rows.append(self.binds)
 
     def executemany(self, sql, rows):
         self.sql = sql
@@ -60,12 +63,14 @@ class FakeConnection:
     def __init__(self, cursor):
         self._cursor = cursor
         self.committed = False
+        self.closed = False
         self.version = "23.4.0.0.0"
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        self.closed = True
         return False
 
     def cursor(self):
@@ -73,6 +78,17 @@ class FakeConnection:
 
     def commit(self):
         self.committed = True
+
+
+class ConnectionBoundLob:
+    def __init__(self, connection, value):
+        self.connection = connection
+        self.value = value
+
+    def read(self):
+        if self.connection.closed:
+            raise RuntimeError("LOB was read after its connection closed")
+        return self.value
 
 
 class RecordingOracleVectorHook(OracleVectorHook):
@@ -209,12 +225,31 @@ def test_add_documents_executes_insert_and_commits(monkeypatch):
     monkeypatch.setattr(hook, "get_conn", lambda: conn)
     ids = hook.add_documents(
         table_name="docs",
-        documents=[OracleVectorDocument(id="d1", text="hello", metadata={"source": "unit"}, embedding=[1, 2, 3])],
+        documents=[
+            OracleVectorDocument(
+                id="d1", text="hello", metadata={"source": "unit"}, embedding=[1, 2, 3]
+            ),
+            OracleVectorDocument(
+                id="d2", text="world", metadata={"source": "unit"}, embedding=[4, 5, 6]
+            ),
+        ],
     )
-    assert ids == ["d1"]
+    assert ids == ["d1", "d2"]
     assert "INSERT INTO" in cursor.sql
-    assert cursor.executed_batches[0][0]["id"] == "d1"
-    assert cursor.executed_batches[0][0]["embedding"] == [1.0, 2.0, 3.0]
+    assert cursor.executed_rows == [
+        {
+            "id": "d1",
+            "text": "hello",
+            "metadata": '{"source":"unit"}',
+            "embedding": array("f", [1.0, 2.0, 3.0]),
+        },
+        {
+            "id": "d2",
+            "text": "world",
+            "metadata": '{"source":"unit"}',
+            "embedding": array("f", [4.0, 5.0, 6.0]),
+        },
+    ]
     assert conn.committed
 
 
@@ -232,11 +267,20 @@ def test_add_texts_mutate_on_duplicate_uses_merge(monkeypatch):
     )
     assert "MERGE INTO" in cursor.sql
     assert "WHEN MATCHED THEN UPDATE" in cursor.sql
+    assert cursor.executed_rows == [
+        {
+            "id": "d1",
+            "text": "hello",
+            "metadata": "{}",
+            "embedding": array("f", [1.0, 2.0, 3.0]),
+        }
+    ]
 
 
 def test_similarity_search_by_vector_emits_vector_distance_and_binds(monkeypatch):
-    cursor = FakeCursor(rows=[("d1", "hello", {"source": "unit"}, 0.1)])
+    cursor = FakeCursor()
     conn = FakeConnection(cursor)
+    cursor.rows = [("d1", ConnectionBoundLob(conn, "hello"), {"source": "unit"}, 0.1)]
     hook = RecordingOracleVectorHook()
     monkeypatch.setattr(hook, "get_conn", lambda: conn)
     results = hook.similarity_search_by_vector(
@@ -250,16 +294,36 @@ def test_similarity_search_by_vector_emits_vector_distance_and_binds(monkeypatch
     assert "VECTOR_DISTANCE" in cursor.sql
     assert "COSINE" in cursor.sql
     assert "JSON_SERIALIZE" not in cursor.sql
-    assert cursor.binds["query_embedding"] == [1.0, 2.0, 3.0]
+    assert cursor.binds["query_embedding"] == array("f", [1.0, 2.0, 3.0])
     assert cursor.binds["k"] == 1
     assert results[0].id == "d1"
     assert results[0].metadata == {"source": "unit"}
     assert results[0].distance == 0.1
 
 
+@pytest.mark.parametrize(
+    ("embedding_format", "embedding", "expected"),
+    [
+        (OracleVectorFormat.FLOAT32, [1.0, 2.0, 3.0], array("f", [1.0, 2.0, 3.0])),
+        (OracleVectorFormat.FLOAT64, [1.0, 2.0, 3.0], array("d", [1.0, 2.0, 3.0])),
+        (OracleVectorFormat.INT8, [1, 2, 3], array("b", [1, 2, 3])),
+        (OracleVectorFormat.BINARY, [1, 2, 3], array("B", [1, 2, 3])),
+    ],
+)
+def test_vector_to_bind_value_uses_type_matching_vector_format(embedding_format, embedding, expected):
+    assert vector.vector_to_bind_value(embedding, embedding_format) == expected
+
+
+@pytest.mark.parametrize("embedding_format", [OracleVectorFormat.INT8, OracleVectorFormat.BINARY])
+def test_vector_to_bind_value_rejects_fractional_integer_embeddings(embedding_format):
+    with pytest.raises(ValueError, match="must contain whole numbers"):
+        vector.vector_to_bind_value([1.5], embedding_format)
+
+
 def test_get_by_ids_can_include_embedding(monkeypatch):
-    cursor = FakeCursor(rows=[("d1", "hello", {"source": "unit"}, [1, 2, 3])])
+    cursor = FakeCursor()
     conn = FakeConnection(cursor)
+    cursor.rows = [("d1", ConnectionBoundLob(conn, "hello"), {"source": "unit"}, [1, 2, 3])]
     hook = RecordingOracleVectorHook()
     monkeypatch.setattr(hook, "get_conn", lambda: conn)
     results = hook.get_by_ids(table_name="docs", ids=["d1"], include_embedding=True)
