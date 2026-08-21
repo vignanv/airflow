@@ -93,6 +93,7 @@ class OracleAddVectorDocumentsOperator(BaseOperator):
         text_column: str = "text",
         metadata_column: str = "metadata",
         embedding_column: str = "embedding",
+        embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
         batch_size: int = 1000,
         mutate_on_duplicate: bool = False,
         embedding_provider_config: dict[str, Any] | None = None,
@@ -111,6 +112,7 @@ class OracleAddVectorDocumentsOperator(BaseOperator):
         self.text_column = text_column
         self.metadata_column = metadata_column
         self.embedding_column = embedding_column
+        self.embedding_format = embedding_format
         self.batch_size = batch_size
         self.mutate_on_duplicate = mutate_on_duplicate
         self.embedding_provider_config = embedding_provider_config
@@ -125,6 +127,7 @@ class OracleAddVectorDocumentsOperator(BaseOperator):
             text_column=self.text_column,
             metadata_column=self.metadata_column,
             embedding_column=self.embedding_column,
+            embedding_format=self.embedding_format,
             batch_size=self.batch_size,
             mutate_on_duplicate=self.mutate_on_duplicate,
             embedding_provider_config=self.embedding_provider_config,
@@ -151,6 +154,7 @@ class OracleVectorSearchOperator(BaseOperator):
         text_column: str = "text",
         metadata_column: str = "metadata",
         embedding_column: str = "embedding",
+        embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
         include_score: bool = True,
         include_embedding: bool = False,
         **kwargs: Any,
@@ -170,6 +174,7 @@ class OracleVectorSearchOperator(BaseOperator):
         self.text_column = text_column
         self.metadata_column = metadata_column
         self.embedding_column = embedding_column
+        self.embedding_format = embedding_format
         self.include_score = include_score
         self.include_embedding = include_embedding
 
@@ -188,6 +193,7 @@ class OracleVectorSearchOperator(BaseOperator):
                 text_column=self.text_column,
                 metadata_column=self.metadata_column,
                 embedding_column=self.embedding_column,
+                embedding_format=self.embedding_format,
                 include_score=self.include_score,
                 include_embedding=self.include_embedding,
             )
@@ -202,6 +208,7 @@ class OracleVectorSearchOperator(BaseOperator):
                 text_column=self.text_column,
                 metadata_column=self.metadata_column,
                 embedding_column=self.embedding_column,
+                embedding_format=self.embedding_format,
                 include_score=self.include_score,
                 include_embedding=self.include_embedding,
             )
