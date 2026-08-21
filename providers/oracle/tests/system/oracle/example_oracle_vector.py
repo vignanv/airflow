@@ -18,8 +18,12 @@
 from __future__ import annotations
 
 import datetime
+import logging
+import os
+from typing import Any
 
 from airflow import DAG
+from airflow.decorators import task
 from airflow.providers.oracle.operators.oracle_vector import (
     OracleAddVectorDocumentsOperator,
     OracleCreateVectorIndexOperator,
@@ -30,12 +34,19 @@ from airflow.providers.oracle.operators.oracle_vector import (
 
 TABLE_NAME = "AIRFLOW_VECTOR_DOCS"
 INDEX_NAME = "AIRFLOW_VECTOR_DOCS_HNSW_IDX"
+ORACLE_CONN_ID = os.environ.get("ORACLE_CONN_ID", "oracle_default")
+
+
+@task
+def log_search_results(results: list[dict[str, Any]]) -> None:
+    logging.getLogger(__name__).info("Oracle vector search results: %s", results)
 
 with DAG(
     dag_id="example_oracle_vector",
     start_date=datetime.datetime(2025, 1, 1),
     schedule=None,
     catchup=False,
+    default_args={"oracle_conn_id": ORACLE_CONN_ID},
     tags=["example", "oracle", "vector"],
 ) as dag:
     create_table = OracleCreateVectorTableOperator(
@@ -92,6 +103,7 @@ with DAG(
         distance="COSINE",
         filter={"source": {"$eq": "example"}},
         include_score=True,
+        include_embedding=True,
     )
 
     delete_documents = OracleDeleteVectorDocumentsOperator(
@@ -100,4 +112,5 @@ with DAG(
         ids=["doc-1", "doc-2", "doc-3"],
     )
 
-    create_table >> add_documents >> create_index >> search >> delete_documents
+    search_results = log_search_results(search.output)
+    create_table >> add_documents >> create_index >> search >> search_results >> delete_documents

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+from array import array
 from collections.abc import Iterable, Mapping, Sequence
 from enum import Enum
 from typing import Any
@@ -132,6 +133,27 @@ def vector_to_list(value: Any) -> list[float]:
         return [float(v) for v in value]
     except TypeError as exc:
         raise ValueError(f"Cannot convert value of type {type(value).__name__!r} to vector list") from exc
+
+
+def vector_to_bind_value(
+    value: Any,
+    embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
+) -> array:
+    """Convert an embedding to the typed bind value expected by python-oracledb."""
+    vector_format = normalize_vector_format(embedding_format)
+    values = vector_to_list(value)
+    type_code = {
+        OracleVectorFormat.FLOAT32: "f",
+        OracleVectorFormat.FLOAT64: "d",
+        OracleVectorFormat.INT8: "b",
+        OracleVectorFormat.BINARY: "B",
+        OracleVectorFormat.FLEXIBLE: "f",
+    }[vector_format]
+    if vector_format in {OracleVectorFormat.INT8, OracleVectorFormat.BINARY}:
+        if any(not item.is_integer() for item in values):
+            raise ValueError(f"{vector_format.value} embeddings must contain whole numbers")
+        values = [int(item) for item in values]
+    return array(type_code, values)
 
 
 def coerce_json_dict(value: Any) -> dict[str, Any]:
