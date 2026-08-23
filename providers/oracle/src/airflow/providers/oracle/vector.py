@@ -248,8 +248,8 @@ class OracleJsonFilterBuilder:
     _LOGICAL_OPERATORS = {"$and", "$or", "$nor"}
     _FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
-    def __init__(self, metadata_column_sql: str, *, bind_prefix: str = "vf") -> None:
-        self.metadata_column_sql = metadata_column_sql
+    def __init__(self, metadata_column: str, *, bind_prefix: str = "vf") -> None:
+        self.metadata_column = metadata_column
         self.bind_prefix = bind_prefix
         self.binds: dict[str, Any] = {}
         self._counter = 0
@@ -273,11 +273,11 @@ class OracleJsonFilterBuilder:
 
     def _json_value(self, field: str) -> str:
         path = self._json_path(field).replace("'", "''")
-        return f"JSON_VALUE({self.metadata_column_sql}, '{path}' RETURNING VARCHAR2(4000) NULL ON ERROR)"
+        return f"JSON_VALUE({self.metadata_column}, '{path}' RETURNING VARCHAR2(4000) NULL ON ERROR)"
 
     def _json_exists(self, field: str) -> str:
         path = self._json_path(field).replace("'", "''")
-        return f"JSON_EXISTS({self.metadata_column_sql}, '{path}')"
+        return f"JSON_EXISTS({self.metadata_column}, '{path}')"
 
     def _parse_mapping(self, mapping: Mapping[str, Any]) -> str:
         if not isinstance(mapping, Mapping):
