@@ -236,19 +236,21 @@ def test_add_documents_executes_insert_and_commits(monkeypatch):
     )
     assert ids == ["d1", "d2"]
     assert "INSERT INTO" in cursor.sql
-    assert cursor.executed_rows == [
-        {
-            "id": "d1",
-            "text": "hello",
-            "metadata": '{"source":"unit"}',
-            "embedding": array("f", [1.0, 2.0, 3.0]),
-        },
-        {
-            "id": "d2",
-            "text": "world",
-            "metadata": '{"source":"unit"}',
-            "embedding": array("f", [4.0, 5.0, 6.0]),
-        },
+    assert cursor.executed_batches == [
+        [
+            {
+                "id": "d1",
+                "text": "hello",
+                "metadata": '{"source":"unit"}',
+                "embedding": array("f", [1.0, 2.0, 3.0]),
+            },
+            {
+                "id": "d2",
+                "text": "world",
+                "metadata": '{"source":"unit"}',
+                "embedding": array("f", [4.0, 5.0, 6.0]),
+            },
+        ]
     ]
     assert conn.committed
 
@@ -267,13 +269,15 @@ def test_add_texts_mutate_on_duplicate_uses_merge(monkeypatch):
     )
     assert "MERGE INTO" in cursor.sql
     assert "WHEN MATCHED THEN UPDATE" in cursor.sql
-    assert cursor.executed_rows == [
-        {
-            "id": "d1",
-            "text": "hello",
-            "metadata": "{}",
-            "embedding": array("f", [1.0, 2.0, 3.0]),
-        }
+    assert cursor.executed_batches == [
+        [
+            {
+                "id": "d1",
+                "text": "hello",
+                "metadata": "{}",
+                "embedding": array("f", [1.0, 2.0, 3.0]),
+            }
+        ]
     ]
 
 
