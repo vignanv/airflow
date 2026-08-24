@@ -179,11 +179,11 @@ class OracleVectorHook(OracleHook):
 
         if embedding_provider_config is not None:
             raise NotImplementedError(
-                "DB-side embedding generation is intentionally not implemented in PR 1. "
+                "DB-side embedding generation is not yet supported. "
                 "Pass client-side embeddings instead."
             )
         if embedding_list is None:
-            raise ValueError("embeddings is required for PR 1 client-side ingestion")
+            raise ValueError("embeddings is required for client-side ingestion")
 
         count = require_equal_lengths(texts=text_list, embeddings=embedding_list, metadatas=metadata_list, ids=id_list)
         if id_list is None:
@@ -369,6 +369,7 @@ class OracleVectorHook(OracleHook):
         }
         with self.get_conn() as conn:
             with conn.cursor() as cursor:
+                #self.log.info("Running Oracle vector search SQL:\n%s", sql)
                 cursor.execute(sql, binds)
                 rows = cursor.fetchall()
                 return [
@@ -396,17 +397,16 @@ class OracleVectorHook(OracleHook):
     ) -> list[OracleVectorSearchResult]:
         """Search by query text when the caller supplies the query embedding.
 
-        PR 1 intentionally avoids owning a general embedding abstraction. The
-        query text is retained for API compatibility and logging, but the caller
-        must pass ``embedding``.
+        DB-side embedding generation is not yet supported, so the caller must provide the embedding used for the search. The
+        query text is retained for API compatibility and logging.
         """
         if embedding_provider_config is not None:
             raise NotImplementedError(
-                "DB-side query embedding generation is intentionally not implemented in PR 1. "
+                "DB-side query embedding generation is not yet supported. "
                 "Pass a client-side query embedding instead."
             )
         if embedding is None:
-            raise ValueError("embedding is required for PR 1 similarity_search")
+            raise ValueError("embedding is required for similarity_search")
         self.log.debug("Running vector search for query text of length %s", len(query or ""))
         return self.similarity_search_by_vector(
             table_name=table_name,
@@ -505,22 +505,22 @@ class OracleVectorHook(OracleHook):
         return row is not None
 
     # ------------------------------------------------------------------
-    # Explicitly deferred PR 2 APIs
+    # APIs planned for a future release.
     # ------------------------------------------------------------------
     def max_marginal_relevance_search_by_vector(self, **_: Any) -> list[OracleVectorSearchResult]:
         raise NotImplementedError("MMR search is deferred to a follow-up PR")
 
     def load_onnx_model(self, **_: Any) -> None:
-        raise NotImplementedError("ONNX model loading is deferred to a follow-up PR")
+        raise NotImplementedError("ONNX model loading is not yet supported")
 
     def drop_onnx_model(self, **_: Any) -> None:
-        raise NotImplementedError("ONNX model lifecycle support is deferred to a follow-up PR")
+        raise NotImplementedError("ONNX model lifecycle support is not yet supported")
 
     def generate_embedding(self, **_: Any) -> list[float]:
-        raise NotImplementedError("DB-side embedding generation is deferred to a follow-up PR")
+        raise NotImplementedError("DB-side embedding generation is not yet supported")
 
     def generate_embeddings(self, **_: Any) -> list[list[float]]:
-        raise NotImplementedError("DB-side embedding generation is deferred to a follow-up PR")
+        raise NotImplementedError("DB-side embedding generation is not yet supported")
 
     # ------------------------------------------------------------------
     # Private helpers
