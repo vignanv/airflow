@@ -80,7 +80,6 @@ with DAG(
                 "embedding": [0.0, 0.0, 1.0],
             },
         ],
-        mutate_on_duplicate=True,
     )
 
     create_index = OracleCreateVectorIndexOperator(
