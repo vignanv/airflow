@@ -211,7 +211,6 @@ class OracleVectorHook(OracleHook):
             ),
             rows,
             batch_size=batch_size,
-            use_executemany=False,
         )
         return [str(item) for item in id_list]
 
@@ -576,7 +575,6 @@ class OracleVectorHook(OracleHook):
         rows: Sequence[Mapping[str, Any]],
         *,
         batch_size: int,
-        use_executemany: bool = True,
     ) -> int:
         if not rows:
             return 0
@@ -585,16 +583,11 @@ class OracleVectorHook(OracleHook):
             with conn.cursor() as cursor:
                 for start in range(0, len(rows), batch_size):
                     batch = list(rows[start : start + batch_size])
-                    if use_executemany:
-                        cursor.executemany(sql, batch)
-                        if cursor.rowcount and cursor.rowcount > 0:
-                            total += cursor.rowcount
-                        else:
-                            total += len(batch)
+                    cursor.executemany(sql, batch)
+                    if cursor.rowcount and cursor.rowcount > 0:
+                        total += cursor.rowcount
                     else:
-                        for row in batch:
-                            cursor.execute(sql, row)
-                            total += 1
+                        total += len(batch)
             conn.commit()
         return total
 
