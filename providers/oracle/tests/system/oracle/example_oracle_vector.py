@@ -15,6 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
+"""Exercise an Oracle HNSW vector index with FLOAT32 embeddings.
+
+The Dag creates a vector table, ingests sample documents, and creates an HNSW
+index. It then performs a metadata-filtered cosine-distance search, logs the
+returned scores and embeddings, and removes the test documents.
+"""
+
 from __future__ import annotations
 
 import datetime
