@@ -58,6 +58,9 @@ class FakeCursor:
     def fetchone(self):
         return self.rows[0] if self.rows else None
 
+    def __iter__(self):
+        return iter(self.rows)
+
 
 class FakeConnection:
     def __init__(self, cursor):
@@ -80,17 +83,6 @@ class FakeConnection:
         self.committed = True
 
 
-class ConnectionBoundLob:
-    def __init__(self, connection, value):
-        self.connection = connection
-        self.value = value
-
-    def read(self):
-        if self.connection.closed:
-            raise RuntimeError("LOB was read after its connection closed")
-        return self.value
-
-
 class RecordingOracleVectorHook(OracleVectorHook):
     def __init__(self):
         self.statements = []
@@ -104,32 +96,39 @@ class RecordingOracleVectorHook(OracleVectorHook):
         return self.first_rows.pop(0) if self.first_rows else None
 
 
-@mock.patch.object(vector.oracledb, "enquote_name", new=None, create=True)
-def test_quote_identifier_uses_legacy_quoting_when_driver_helper_is_unavailable():
-    assert quote_identifier("docs") == '"DOCS"'
-    assert quote_identifier("my_schema.docs", allow_schema=True) == '"MY_SCHEMA"."DOCS"'
+@pytest.mark.parametrize(
+    ("identifier", "allow_schema"),
+    [
+        ("docs", False),
+        ("my_schema.docs", True),
+        ('"Some.random.periods.in.my.owner"."some.more.random.periods.in.my.table.name"', True),
+    ],
+)
+def test_quote_identifier_returns_valid_driver_names_unchanged(identifier, allow_schema):
+    assert quote_identifier(identifier, allow_schema=allow_schema) == identifier
 
 
-@mock.patch.object(vector.oracledb, "enquote_name", create=True)
-def test_quote_identifier_uses_driver_quoting_helper(enquote_name):
-    enquote_name.side_effect = lambda part: f'"{part.upper()}"'
-
-    assert quote_identifier("docs") == '"DOCS"'
-    assert quote_identifier("my_schema.docs", allow_schema=True) == '"MY_SCHEMA"."DOCS"'
-    assert enquote_name.call_args_list == [mock.call("docs"), mock.call("my_schema"), mock.call("docs")]
-
-
-@mock.patch.object(OracleVectorHook, "get_conn")
-def test_get_database_version_parses_connection_version(mock_get_conn):
-    mock_get_conn.return_value = FakeConnection(FakeCursor())
-
-    assert RecordingOracleVectorHook().get_database_version() == (23, 4, 0, 0, 0)
+@mock.patch.object(vector.oracledb, "is_simple_sql_name", new=None, create=True)
+@mock.patch.object(vector.oracledb, "is_qualified_sql_name", new=None, create=True)
+def test_quote_identifier_uses_compatibility_validation_for_older_drivers():
+    assert quote_identifier("docs") == "docs"
+    assert quote_identifier('"owner.with.periods"."table.with.periods"', allow_schema=True) == (
+        '"owner.with.periods"."table.with.periods"'
+    )
 
 
-@pytest.mark.parametrize("identifier", ["docs;drop table x", "docs where 1=1", "1docs", "docs--", "schema.table.extra"])
-def test_quote_identifier_rejects_unsafe_names(identifier):
-    with pytest.raises(ValueError):
-        quote_identifier(identifier, allow_schema=True)
+@pytest.mark.parametrize(
+    ("identifier", "allow_schema", "expected"),
+    [
+        ("docs;drop table x", True, '"DOCS;DROP TABLE X"'),
+        ("docs where 1=1", True, '"DOCS WHERE 1=1"'),
+        ("1docs", True, '"1DOCS"'),
+        ("docs--", True, '"DOCS--"'),
+        ("schema.table.extra", False, '"SCHEMA.TABLE.EXTRA"'),
+    ],
+)
+def test_quote_identifier_quotes_invalid_names(identifier, allow_schema, expected):
+    assert quote_identifier(identifier, allow_schema=allow_schema) == expected
 
 
 def test_create_vector_table_emits_expected_ddl():
@@ -137,9 +136,9 @@ def test_create_vector_table_emits_expected_ddl():
     hook.create_vector_table(table_name="docs", embedding_dimension=3, if_not_exists=False)
     sql = hook.statements[-1]
     assert "CREATE TABLE" in sql
-    assert '"DOCS"' in sql
-    assert '"EMBEDDING" VECTOR(3, FLOAT32) NOT NULL' in sql
-    assert '"METADATA" JSON' in sql
+    assert "docs" in sql
+    assert "embedding VECTOR(3, FLOAT32) NOT NULL" in sql
+    assert "metadata JSON" in sql
 
 
 def test_create_vector_table_uses_if_not_exists_by_default():
@@ -147,32 +146,16 @@ def test_create_vector_table_uses_if_not_exists_by_default():
 
     hook.create_vector_table(table_name="docs", embedding_dimension=3)
 
-    assert hook.statements[-1].startswith('CREATE TABLE IF NOT EXISTS "DOCS"')
+    assert hook.statements[-1].startswith("CREATE TABLE IF NOT EXISTS docs")
 
 
-@pytest.mark.parametrize(
-    ("purge", "if_exists", "expected"),
-    [
-        (False, True, 'DROP TABLE IF EXISTS "DOCS"'),
-        (True, True, 'DROP TABLE IF EXISTS "DOCS" PURGE'),
-        (False, False, 'DROP TABLE "DOCS"'),
-    ],
-)
-def test_drop_vector_table_uses_conditional_ddl(purge, if_exists, expected):
-    hook = RecordingOracleVectorHook()
-
-    hook.drop_vector_table(table_name="docs", purge=purge, if_exists=if_exists)
-
-    assert hook.statements == [expected]
-
-
-def test_create_vector_table_overwrites_with_conditional_drop():
+def test_create_vector_table_overwrites_with_if_exists_drop():
     hook = RecordingOracleVectorHook()
 
     hook.create_vector_table(table_name="docs", embedding_dimension=3, overwrite=True, if_not_exists=False)
 
-    assert hook.statements[0] == 'DROP TABLE IF EXISTS "DOCS"'
-    assert hook.statements[1].startswith('CREATE TABLE "DOCS"')
+    assert hook.statements[0] == "DROP TABLE IF EXISTS docs"
+    assert hook.statements[1].startswith("CREATE TABLE docs")
 
 
 @pytest.mark.parametrize(
@@ -192,7 +175,7 @@ def test_create_vector_table_accepts_supported_embedding_formats(embedding_forma
         embedding_format=embedding_format,
         if_not_exists=False,
     )
-    assert f'"EMBEDDING" VECTOR(3, {expected}) NOT NULL' in hook.statements[-1]
+    assert f"embedding VECTOR(3, {expected}) NOT NULL" in hook.statements[-1]
 
 
 def test_create_vector_table_rejects_unsupported_embedding_format():
@@ -203,6 +186,41 @@ def test_create_vector_table_rejects_unsupported_embedding_format():
             embedding_dimension=3,
             embedding_format="FLOAT16",
             if_not_exists=False,
+        )
+
+
+@pytest.mark.parametrize(
+    ("embedding_format", "expected_format"),
+    [
+        (OracleVectorFormat.FLOAT32, "FLOAT32"),
+        (OracleVectorFormat.FLOAT64, "FLOAT64"),
+        (OracleVectorFormat.INT8, "INT8"),
+    ],
+)
+def test_create_vector_table_creates_sparse_vector_column(embedding_format, expected_format):
+    hook = RecordingOracleVectorHook()
+
+    hook.create_vector_table(
+        table_name="docs",
+        embedding_dimension=3,
+        embedding_format=embedding_format,
+        sparse=True,
+        if_not_exists=False,
+    )
+
+    assert f"embedding VECTOR(3, {expected_format}, SPARSE) NOT NULL" in hook.statements[-1]
+
+
+@pytest.mark.parametrize("embedding_format", [OracleVectorFormat.BINARY, OracleVectorFormat.FLEXIBLE])
+def test_create_vector_table_rejects_sparse_vector_with_unsupported_format(embedding_format):
+    hook = RecordingOracleVectorHook()
+
+    with pytest.raises(ValueError, match="Sparse vectors support"):
+        hook.create_vector_table(
+            table_name="docs",
+            embedding_dimension=3,
+            embedding_format=embedding_format,
+            sparse=True,
         )
 
 
@@ -255,6 +273,21 @@ def test_add_documents_executes_insert_and_commits(monkeypatch):
     assert conn.committed
 
 
+def test_add_documents_preserves_sparse_embeddings(monkeypatch):
+    cursor = FakeCursor()
+    conn = FakeConnection(cursor)
+    hook = RecordingOracleVectorHook()
+    monkeypatch.setattr(hook, "get_conn", lambda: conn)
+    embedding = vector.oracledb.SparseVector(5, [1, 3], array("f", [4.0, 5.0]))
+
+    hook.add_documents(
+        table_name="docs",
+        documents=[OracleVectorDocument(id="d1", text="hello", embedding=embedding)],
+    )
+
+    assert cursor.executed_batches[0][0]["embedding"] is embedding
+
+
 def test_add_texts_mutate_on_duplicate_uses_merge(monkeypatch):
     cursor = FakeCursor()
     conn = FakeConnection(cursor)
@@ -284,7 +317,7 @@ def test_add_texts_mutate_on_duplicate_uses_merge(monkeypatch):
 def test_similarity_search_by_vector_emits_vector_distance_and_binds(monkeypatch):
     cursor = FakeCursor()
     conn = FakeConnection(cursor)
-    cursor.rows = [("d1", ConnectionBoundLob(conn, "hello"), {"source": "unit"}, 0.1)]
+    cursor.rows = [("d1", "hello", {"source": "unit"}, 0.1)]
     hook = RecordingOracleVectorHook()
     monkeypatch.setattr(hook, "get_conn", lambda: conn)
     results = hook.similarity_search_by_vector(
@@ -303,6 +336,18 @@ def test_similarity_search_by_vector_emits_vector_distance_and_binds(monkeypatch
     assert results[0].id == "d1"
     assert results[0].metadata == {"source": "unit"}
     assert results[0].distance == 0.1
+
+
+def test_similarity_search_by_vector_preserves_sparse_query_embedding(monkeypatch):
+    cursor = FakeCursor()
+    conn = FakeConnection(cursor)
+    hook = RecordingOracleVectorHook()
+    monkeypatch.setattr(hook, "get_conn", lambda: conn)
+    embedding = vector.oracledb.SparseVector(5, [1, 3], array("f", [4.0, 5.0]))
+
+    hook.similarity_search_by_vector(table_name="docs", embedding=embedding, k=1)
+
+    assert cursor.binds["query_embedding"] is embedding
 
 
 @pytest.mark.parametrize(
@@ -324,10 +369,34 @@ def test_vector_to_bind_value_rejects_fractional_integer_embeddings(embedding_fo
         vector.vector_to_bind_value([1.5], embedding_format)
 
 
+def test_vector_to_bind_value_preserves_native_driver_vectors():
+    dense_vector = array("d", [1.0, 2.0, 3.0])
+    sparse_vector = vector.oracledb.SparseVector(5, [1, 3], array("b", [4, 5]))
+
+    assert vector.vector_to_bind_value(dense_vector) is dense_vector
+    assert vector.vector_to_bind_value(sparse_vector) is sparse_vector
+
+
+def test_vector_to_result_serializes_sparse_vector():
+    sparse_vector = vector.oracledb.SparseVector(5, [1, 3], array("f", [4.0, 5.0]))
+
+    assert vector.vector_to_result(sparse_vector) == {
+        "num_dimensions": 5,
+        "indices": [1, 3],
+        "values": [4.0, 5.0],
+    }
+
+
+def test_coerce_json_dict_returns_existing_dict():
+    metadata = {"source": "unit"}
+
+    assert vector.coerce_json_dict(metadata) is metadata
+
+
 def test_get_by_ids_can_include_embedding(monkeypatch):
     cursor = FakeCursor()
     conn = FakeConnection(cursor)
-    cursor.rows = [("d1", ConnectionBoundLob(conn, "hello"), {"source": "unit"}, [1, 2, 3])]
+    cursor.rows = [("d1", "hello", {"source": "unit"}, [1, 2, 3])]
     hook = RecordingOracleVectorHook()
     monkeypatch.setattr(hook, "get_conn", lambda: conn)
     results = hook.get_by_ids(table_name="docs", ids=["d1"], include_embedding=True)
@@ -336,6 +405,28 @@ def test_get_by_ids_can_include_embedding(monkeypatch):
     assert cursor.binds == {"id_0": "d1"}
     assert results[0].metadata == {"source": "unit"}
     assert results[0].embedding == [1.0, 2.0, 3.0]
+
+
+def test_get_by_ids_returns_sparse_embedding(monkeypatch):
+    cursor = FakeCursor()
+    conn = FakeConnection(cursor)
+    cursor.rows = [
+        (
+            "d1",
+            "hello",
+            {"source": "unit"},
+            vector.oracledb.SparseVector(5, [1, 3], array("f", [4.0, 5.0])),
+        )
+    ]
+    hook = RecordingOracleVectorHook()
+    monkeypatch.setattr(hook, "get_conn", lambda: conn)
+
+    results = hook.get_by_ids(table_name="docs", ids=["d1"], include_embedding=True)
+
+    assert isinstance(results[0].embedding, vector.oracledb.SparseVector)
+    assert results[0].embedding.num_dimensions == 5
+    assert list(results[0].embedding.indices) == [1, 3]
+    assert list(results[0].embedding.values) == [4.0, 5.0]
 
 
 def test_delete_executes_delete(monkeypatch):
@@ -358,6 +449,24 @@ def test_filter_builder_logical_operators():
     assert binds["vf_2"] == 2
 
 
+def test_filter_builder_supports_quoted_field_names():
+    builder = OracleJsonFilterBuilder("metadata")
+
+    clause, binds = builder.build({'"source.version"': "unit"})
+
+    assert "$.\"source.version\"" in clause
+    assert binds == {"vf_1": "unit"}
+
+
+def test_filter_builder_accepts_iterable_between_bounds():
+    builder = OracleJsonFilterBuilder("metadata")
+
+    clause, binds = builder.build({"version": {"$between": iter((1, 2))}})
+
+    assert "BETWEEN :vf_1 AND :vf_2" in clause
+    assert binds == {"vf_1": 1, "vf_2": 2}
+
+
 def test_filter_builder_rejects_unknown_operator():
     builder = OracleJsonFilterBuilder('"METADATA"')
     with pytest.raises(ValueError):
@@ -377,7 +486,7 @@ def test_create_hnsw_index_emits_ddl():
         ef_construction=200,
     )
     sql = hook.statements[-1]
-    assert "CREATE VECTOR INDEX" in sql
+    assert "CREATE VECTOR INDEX IF NOT EXISTS" in sql
     assert "ORGANIZATION INMEMORY NEIGHBOR GRAPH" in sql
     assert "DISTANCE COSINE" in sql
     assert "neighbors 32" in sql
@@ -398,19 +507,12 @@ def test_create_ivf_index_emits_ddl():
     assert "neighbor partitions 10" in sql
 
 
-@pytest.mark.parametrize(
-    ("if_exists", "expected"),
-    [
-        (True, 'DROP INDEX IF EXISTS "DOCS_HNSW_IDX"'),
-        (False, 'DROP INDEX "DOCS_HNSW_IDX"'),
-    ],
-)
-def test_drop_vector_index_uses_conditional_ddl(if_exists, expected):
+def test_drop_vector_index_uses_if_exists_ddl():
     hook = RecordingOracleVectorHook()
 
-    hook.drop_vector_index(index_name="docs_hnsw_idx", if_exists=if_exists)
+    hook.drop_vector_index(index_name="docs_hnsw_idx")
 
-    assert hook.statements == [expected]
+    assert hook.statements == ["DROP INDEX IF EXISTS docs_hnsw_idx"]
 
 
 def test_create_index_validates_parameter_combinations():

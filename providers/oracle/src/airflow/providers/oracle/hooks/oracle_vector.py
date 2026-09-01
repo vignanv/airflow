@@ -15,20 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Oracle AI Vector Search hook."""
+"""
+Oracle AI Vector Search hook.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, cast
 from uuid import uuid4
-
-try:
-    from airflow.exceptions import AirflowException
-except Exception:  # pragma: no cover - useful for isolated unit testing outside Airflow
-    class AirflowException(Exception):
-        pass
 
 from airflow.providers.oracle.hooks.oracle import OracleHook
 from airflow.providers.oracle.vector import (
@@ -45,33 +41,35 @@ from airflow.providers.oracle.vector import (
     quote_identifier,
     require_equal_lengths,
     validate_positive_int,
+    VectorInput,
+    VectorValue,
     vector_to_bind_value,
-    vector_to_list,
 )
 
 
 @dataclass(frozen=True)
 class OracleVectorDocument:
-    """Document payload accepted by OracleVectorHook ingestion APIs."""
+    """
+    Document payload accepted by OracleVectorHook ingestion APIs.
+    """
 
     id: str
     text: str
     metadata: dict[str, Any] | None = None
-    embedding: Sequence[float] | None = None
+    embedding: VectorInput | None = None
 
 
 @dataclass(frozen=True)
 class OracleVectorSearchResult:
-    """XCom-safe Oracle vector search result."""
+    """
+    Oracle vector search result.
+    """
 
     id: str | None
     text: str
     metadata: dict[str, Any]
     distance: float | None = None
-    embedding: list[float] | None = None
-
-    def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+    embedding: VectorValue | None = None
 
 
 class OracleVectorHook(OracleHook):
@@ -81,29 +79,8 @@ class OracleVectorHook(OracleHook):
     Airflow operators can expose them as templated task arguments.
     """
 
-    conn_name_attr = "oracle_conn_id"
-    default_conn_name = "oracle_default"
-    conn_type = "oracle"
-    hook_name = "Oracle Vector"
-
     def __init__(self, *args: Any, oracle_conn_id: str = "oracle_default", **kwargs: Any) -> None:
-        super().__init__(*args, oracle_conn_id=oracle_conn_id, **kwargs)
-
-    # ------------------------------------------------------------------
-    # Capability checks
-    # ------------------------------------------------------------------
-    def get_database_version(self) -> tuple[int, ...]:
-        """Return the connected Oracle database version as a tuple of ints."""
-        return tuple(int(part) for part in self.get_conn().version.split(".") if part.isdigit())
-
-    def check_vector_support(self, *, minimum_version: tuple[int, int] = (23, 4)) -> None:
-        """Raise AirflowException if the database version is too old for VECTOR support."""
-        version = self.get_database_version()
-        comparable = version + (0,) * max(0, len(minimum_version) - len(version))
-        if comparable[: len(minimum_version)] < minimum_version:
-            required = ".".join(str(part) for part in minimum_version)
-            actual = ".".join(str(part) for part in version) or "unknown"
-            raise AirflowException(f"Oracle AI Vector Search requires database version >= {required}; got {actual}")
+        super().__init__(*args, oracle_conn_id=oracle_conn_id, fetch_lobs=True, **kwargs)
 
     # ------------------------------------------------------------------
     # Table management
@@ -118,36 +95,40 @@ class OracleVectorHook(OracleHook):
         metadata_column: str = "metadata",
         embedding_column: str = "embedding",
         embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
+        sparse: bool = False,
         if_not_exists: bool = True,
         overwrite: bool = False,
     ) -> None:
-        """Create an Oracle vector table."""
+        """
+        Create an Oracle vector table.
+        """
         validate_positive_int("embedding_dimension", embedding_dimension)
         embedding_format = normalize_vector_format(embedding_format)
+        if sparse and embedding_format not in {
+            OracleVectorFormat.FLOAT32,
+            OracleVectorFormat.FLOAT64,
+            OracleVectorFormat.INT8,
+        }:
+            raise ValueError("Sparse vectors support FLOAT32, FLOAT64, and INT8 formats only")
+        quoted_table_name = quote_identifier(table_name, allow_schema=True)
         if overwrite and if_not_exists:
             raise ValueError("overwrite=True cannot be combined with if_not_exists=True")
         if overwrite:
-            self.drop_vector_table(table_name=table_name, if_exists=True)
+            self.run(f"DROP TABLE IF EXISTS {quoted_table_name}")
 
-        quoted_table_name = quote_identifier(table_name, allow_schema=True)
         quoted_id_column = quote_identifier(id_column)
         quoted_text_column = quote_identifier(text_column)
         quoted_metadata_column = quote_identifier(metadata_column)
         quoted_embedding_column = quote_identifier(embedding_column)
         if_not_exists_sql = " IF NOT EXISTS" if if_not_exists else ""
+        sparse_sql = ", SPARSE" if sparse else ""
         sql = f"""CREATE TABLE{if_not_exists_sql} {quoted_table_name} (
             {quoted_id_column} VARCHAR2(512) PRIMARY KEY,
             {quoted_text_column} CLOB NOT NULL,
             {quoted_metadata_column} JSON,
-            {quoted_embedding_column} VECTOR({embedding_dimension}, {embedding_format.value}) NOT NULL
+            {quoted_embedding_column} VECTOR({embedding_dimension}, {embedding_format.value}{sparse_sql}) NOT NULL
         )"""
         self.run(sql)
-
-    def drop_vector_table(self, *, table_name: str, purge: bool = False, if_exists: bool = True) -> None:
-        """Drop an Oracle vector table."""
-        if_exists_sql = " IF EXISTS" if if_exists else ""
-        suffix = " PURGE" if purge else ""
-        self.run(f"DROP TABLE{if_exists_sql} {quote_identifier(table_name, allow_schema=True)}{suffix}")
 
     # ------------------------------------------------------------------
     # Ingestion and retrieval
@@ -157,7 +138,7 @@ class OracleVectorHook(OracleHook):
         *,
         table_name: str,
         texts: Iterable[str],
-        embeddings: Iterable[Sequence[float]] | None = None,
+        embeddings: Iterable[VectorInput] | None = None,
         metadatas: Iterable[dict[str, Any] | None] | None = None,
         ids: Iterable[str] | None = None,
         id_column: str = "id",
@@ -169,7 +150,9 @@ class OracleVectorHook(OracleHook):
         mutate_on_duplicate: bool = False,
         embedding_provider_config: dict[str, Any] | None = None,
     ) -> list[str]:
-        """Insert or upsert texts and embeddings into a vector table."""
+        """
+        Insert or upsert texts and embeddings into a vector table.
+        """
         validate_positive_int("batch_size", batch_size)
         text_list = materialize_iterable("texts", texts) or []
         embedding_list = materialize_iterable("embeddings", embeddings)
@@ -228,10 +211,12 @@ class OracleVectorHook(OracleHook):
         mutate_on_duplicate: bool = False,
         embedding_provider_config: dict[str, Any] | None = None,
     ) -> list[str]:
-        """Insert or upsert structured document objects into a vector table."""
+        """
+        Insert or upsert structured document objects into a vector table.
+        """
         docs = list(documents)
         texts: list[str] = []
-        embeddings: list[Sequence[float] | None] = []
+        embeddings: list[VectorInput | None] = []
         metadatas: list[dict[str, Any] | None] = []
         ids: list[str] = []
         for doc in docs:
@@ -252,7 +237,7 @@ class OracleVectorHook(OracleHook):
         return self.add_texts(
             table_name=table_name,
             texts=texts,
-            embeddings=embeddings,  # type: ignore[arg-type]
+            embeddings=cast(Iterable[VectorInput], embeddings),
             metadatas=metadatas,
             ids=ids,
             id_column=id_column,
@@ -266,7 +251,9 @@ class OracleVectorHook(OracleHook):
         )
 
     def delete(self, *, table_name: str, ids: Sequence[str], id_column: str = "id") -> int:
-        """Delete documents by id and return row count."""
+        """
+        Delete documents by id and return row count.
+        """
         if not ids:
             return 0
         quoted_table_name = quote_identifier(table_name, allow_schema=True)
@@ -286,7 +273,9 @@ class OracleVectorHook(OracleHook):
         include_embedding: bool = False,
         embedding_column: str = "embedding",
     ) -> list[OracleVectorSearchResult]:
-        """Fetch documents by id."""
+        """
+        Fetch documents by id.
+        """
         if not ids:
             return []
         quoted_table_name = quote_identifier(table_name, allow_schema=True)
@@ -310,9 +299,9 @@ class OracleVectorHook(OracleHook):
         with self.get_conn() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, binds)
-                rows = cursor.fetchall()
                 return [
-                    self._row_to_result(row, include_score=False, include_embedding=include_embedding) for row in rows
+                    self._row_to_result(row, include_score=False, include_embedding=include_embedding)
+                    for row in cursor
                 ]
 
     # ------------------------------------------------------------------
@@ -322,7 +311,7 @@ class OracleVectorHook(OracleHook):
         self,
         *,
         table_name: str,
-        embedding: Sequence[float],
+        embedding: VectorInput,
         k: int = 4,
         distance: OracleVectorDistance | str = OracleVectorDistance.EUCLIDEAN,
         filter: dict[str, Any] | None = None,
@@ -334,7 +323,9 @@ class OracleVectorHook(OracleHook):
         include_score: bool = False,
         include_embedding: bool = False,
     ) -> list[OracleVectorSearchResult]:
-        """Run Oracle VECTOR_DISTANCE search by query vector."""
+        """
+        Run Oracle VECTOR_DISTANCE search by query vector.
+        """
         validate_positive_int("k", k)
         distance = normalize_distance(distance)
         quoted_table_name = quote_identifier(table_name, allow_schema=True)
@@ -371,10 +362,9 @@ class OracleVectorHook(OracleHook):
             with conn.cursor() as cursor:
                 #self.log.info("Running Oracle vector search SQL:\n%s", sql)
                 cursor.execute(sql, binds)
-                rows = cursor.fetchall()
                 return [
                     self._row_to_result(row, include_score=include_score, include_embedding=include_embedding)
-                    for row in rows
+                    for row in cursor
                 ]
 
     def similarity_search(
@@ -382,7 +372,7 @@ class OracleVectorHook(OracleHook):
         *,
         table_name: str,
         query: str,
-        embedding: Sequence[float] | None = None,
+        embedding: VectorInput | None = None,
         embedding_provider_config: dict[str, Any] | None = None,
         k: int = 4,
         distance: OracleVectorDistance | str = OracleVectorDistance.EUCLIDEAN,
@@ -441,10 +431,9 @@ class OracleVectorHook(OracleHook):
         neighbor_partitions: int | None = None,
         if_not_exists: bool = True,
     ) -> None:
-        """Create an HNSW or IVF vector index."""
-        if if_not_exists and self.vector_index_exists(index_name=index_name, table_name=table_name):
-            self.log.info("Vector index %s already exists; skipping creation", index_name)
-            return
+        """
+        Create an HNSW or IVF vector index.
+        """
         index_type = normalize_index_type(index_type)
         distance = normalize_distance(distance)
         validate_positive_int("accuracy", accuracy, minimum=1, maximum=100)
@@ -460,7 +449,11 @@ class OracleVectorHook(OracleHook):
         quoted_index_name = quote_identifier(index_name)
         quoted_table_name = quote_identifier(table_name, allow_schema=True)
         quoted_embedding_column = quote_identifier(embedding_column)
-        parts = [f"CREATE VECTOR INDEX {quoted_index_name} ON {quoted_table_name} ({quoted_embedding_column})"]
+        if_not_exists_sql = " IF NOT EXISTS" if if_not_exists else ""
+        parts = [
+            f"CREATE VECTOR INDEX{if_not_exists_sql} {quoted_index_name} "
+            f"ON {quoted_table_name} ({quoted_embedding_column})"
+        ]
         if index_type == OracleVectorIndexType.HNSW:
             parts.append("ORGANIZATION INMEMORY NEIGHBOR GRAPH")
         else:
@@ -480,29 +473,11 @@ class OracleVectorHook(OracleHook):
             parts.append(f"PARALLEL {parallel}")
         self.run("\n".join(parts))
 
-    def drop_vector_index(self, *, index_name: str, if_exists: bool = True) -> None:
-        """Drop a vector index."""
-        if_exists_sql = " IF EXISTS" if if_exists else ""
-        self.run(f"DROP INDEX{if_exists_sql} {quote_identifier(index_name)}")
-
-    def vector_index_exists(self, *, index_name: str, table_name: str | None = None) -> bool:
-        """Return True when an index exists."""
-        binds = {"index_name": index_name.upper()}
-        if table_name:
-            owner, table = self._split_object_name(table_name)
-            if owner:
-                sql = (
-                    "SELECT 1 FROM ALL_INDEXES WHERE INDEX_NAME = :index_name "
-                    "AND TABLE_OWNER = :owner AND TABLE_NAME = :table_name"
-                )
-                binds.update({"owner": owner.upper(), "table_name": table.upper()})
-            else:
-                sql = "SELECT 1 FROM USER_INDEXES WHERE INDEX_NAME = :index_name AND TABLE_NAME = :table_name"
-                binds["table_name"] = table.upper()
-        else:
-            sql = "SELECT 1 FROM USER_INDEXES WHERE INDEX_NAME = :index_name"
-        row = self.get_first(sql, parameters=binds)
-        return row is not None
+    def drop_vector_index(self, *, index_name: str) -> None:
+        """
+        Drop a vector index.
+        """
+        self.run(f"DROP INDEX IF EXISTS {quote_identifier(index_name)}")
 
     # ------------------------------------------------------------------
     # APIs planned for a future release.
@@ -525,11 +500,6 @@ class OracleVectorHook(OracleHook):
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-    def _split_object_name(self, object_name: str) -> tuple[str | None, str]:
-        quote_identifier(object_name, allow_schema=True)
-        parts = object_name.split(".")
-        return (parts[0], parts[1]) if len(parts) == 2 else (None, parts[0])
-
     def _insert_or_merge_sql(
         self,
         *,
@@ -584,7 +554,7 @@ class OracleVectorHook(OracleHook):
                 for start in range(0, len(rows), batch_size):
                     batch = list(rows[start : start + batch_size])
                     cursor.executemany(sql, batch)
-                    if cursor.rowcount and cursor.rowcount > 0:
+                    if cursor.rowcount > 0:
                         total += cursor.rowcount
                     else:
                         total += len(batch)
@@ -601,7 +571,7 @@ class OracleVectorHook(OracleHook):
         idx = 0
         doc_id = None if row[idx] is None else str(row[idx])
         idx += 1
-        text = row[idx].read() if hasattr(row[idx], "read") else str(row[idx])
+        text = str(row[idx])
         idx += 1
         metadata = coerce_json_dict(row[idx])
         idx += 1
@@ -611,5 +581,5 @@ class OracleVectorHook(OracleHook):
             idx += 1
         embedding = None
         if include_embedding:
-            embedding = vector_to_list(row[idx])
+            embedding = row[idx]
         return OracleVectorSearchResult(id=doc_id, text=text, metadata=metadata, distance=distance, embedding=embedding)
