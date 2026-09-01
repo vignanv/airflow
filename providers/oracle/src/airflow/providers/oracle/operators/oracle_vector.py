@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Oracle AI Vector Search operators."""
+"""
+Oracle AI Vector Search operators.
+"""
 
 from __future__ import annotations
 
@@ -24,14 +26,22 @@ from typing import TYPE_CHECKING, Any
 
 from airflow.models import BaseOperator
 from airflow.providers.oracle.hooks.oracle_vector import OracleVectorDocument, OracleVectorHook
-from airflow.providers.oracle.vector import OracleVectorDistance, OracleVectorFormat, OracleVectorIndexType
+from airflow.providers.oracle.vector import (
+    OracleVectorDistance,
+    OracleVectorFormat,
+    OracleVectorIndexType,
+    VectorInput,
+    vector_to_result,
+)
 
 if TYPE_CHECKING:
     from airflow.utils.context import Context
 
 
 class OracleCreateVectorTableOperator(BaseOperator):
-    """Create an Oracle vector table."""
+    """
+    Create an Oracle vector table.
+    """
 
     template_fields: Sequence[str] = ("table_name",)
 
@@ -46,6 +56,7 @@ class OracleCreateVectorTableOperator(BaseOperator):
         metadata_column: str = "metadata",
         embedding_column: str = "embedding",
         embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
+        sparse: bool = False,
         if_not_exists: bool = True,
         overwrite: bool = False,
         **kwargs: Any,
@@ -59,6 +70,7 @@ class OracleCreateVectorTableOperator(BaseOperator):
         self.metadata_column = metadata_column
         self.embedding_column = embedding_column
         self.embedding_format = embedding_format
+        self.sparse = sparse
         self.if_not_exists = if_not_exists
         self.overwrite = overwrite
 
@@ -72,13 +84,16 @@ class OracleCreateVectorTableOperator(BaseOperator):
             metadata_column=self.metadata_column,
             embedding_column=self.embedding_column,
             embedding_format=self.embedding_format,
+            sparse=self.sparse,
             if_not_exists=self.if_not_exists,
             overwrite=self.overwrite,
         )
 
 
 class OracleAddVectorDocumentsOperator(BaseOperator):
-    """Add documents to an Oracle vector table."""
+    """
+    Add documents to an Oracle vector table.
+    """
 
     template_fields: Sequence[str] = ("table_name",)
 
@@ -135,7 +150,9 @@ class OracleAddVectorDocumentsOperator(BaseOperator):
 
 
 class OracleVectorSearchOperator(BaseOperator):
-    """Run Oracle vector similarity search and return XCom-safe dictionaries."""
+    """
+    Run Oracle vector similarity search and return XCom-safe dictionaries.
+    """
 
     template_fields: Sequence[str] = ("table_name", "query")
 
@@ -144,7 +161,7 @@ class OracleVectorSearchOperator(BaseOperator):
         *,
         table_name: str,
         query: str | None = None,
-        embedding: Sequence[float] | None = None,
+        embedding: VectorInput | None = None,
         oracle_conn_id: str = "oracle_default",
         embedding_provider_config: dict[str, Any] | None = None,
         k: int = 4,
@@ -212,11 +229,22 @@ class OracleVectorSearchOperator(BaseOperator):
                 include_score=self.include_score,
                 include_embedding=self.include_embedding,
             )
-        return [result.as_dict() for result in results]
+        return [
+            {
+                "id": result.id,
+                "text": result.text,
+                "metadata": result.metadata,
+                "distance": result.distance,
+                "embedding": vector_to_result(result.embedding) if result.embedding is not None else None,
+            }
+            for result in results
+        ]
 
 
 class OracleCreateVectorIndexOperator(BaseOperator):
-    """Create an Oracle HNSW or IVF vector index."""
+    """
+    Create an Oracle HNSW or IVF vector index.
+    """
 
     template_fields: Sequence[str] = ("table_name", "index_name")
 
@@ -269,7 +297,9 @@ class OracleCreateVectorIndexOperator(BaseOperator):
 
 
 class OracleDeleteVectorDocumentsOperator(BaseOperator):
-    """Delete vector documents by id."""
+    """
+    Delete vector documents by id.
+    """
 
     template_fields: Sequence[str] = ("table_name",)
 
