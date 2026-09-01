@@ -115,6 +115,7 @@ with DAG(
         ],
     )
 
+    # [START howto_operator_oracle_vector_ivf_index]
     create_index = OracleCreateVectorIndexOperator(
         task_id="create_ivf_vector_index",
         table_name=TABLE_NAME,
@@ -125,7 +126,9 @@ with DAG(
         neighbor_partitions=2,
         if_not_exists=True,
     )
+    # [END howto_operator_oracle_vector_ivf_index]
 
+    # [START howto_operator_oracle_vector_ivf_search]
     search = OracleVectorSearchOperator(
         task_id="search_documents",
         table_name=TABLE_NAME,
@@ -137,6 +140,7 @@ with DAG(
         include_score=True,
         include_embedding=True,
     )
+    # [END howto_operator_oracle_vector_ivf_search]
 
     validate_results = validate_search_results(search.output)
 

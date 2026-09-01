@@ -109,6 +109,7 @@ with DAG(
         ],
     )
 
+    # [START howto_operator_oracle_vector_upsert]
     upsert_document = OracleAddVectorDocumentsOperator(
         task_id="upsert_document",
         table_name=TABLE_NAME,
@@ -126,6 +127,7 @@ with DAG(
             }
         ],
     )
+    # [END howto_operator_oracle_vector_upsert]
 
     search = OracleVectorSearchOperator(
         task_id="search_updated_document",
