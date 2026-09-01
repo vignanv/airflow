@@ -48,6 +48,7 @@ ORACLE_CONN_ID = os.environ.get("ORACLE_CONN_ID", "oracle_default")
 def log_search_results(results: list[dict[str, Any]]) -> None:
     logging.getLogger(__name__).info("Oracle vector search results: %s", results)
 
+
 with DAG(
     dag_id="example_oracle_vector",
     start_date=datetime.datetime(2025, 1, 1),
@@ -56,6 +57,7 @@ with DAG(
     default_args={"oracle_conn_id": ORACLE_CONN_ID},
     tags=["example", "oracle", "vector"],
 ) as dag:
+    # [START howto_operator_oracle_vector_create_table]
     create_table = OracleCreateVectorTableOperator(
         task_id="create_vector_table",
         table_name=TABLE_NAME,
@@ -63,7 +65,9 @@ with DAG(
         overwrite=True,
         if_not_exists=False,
     )
+    # [END howto_operator_oracle_vector_create_table]
 
+    # [START howto_operator_oracle_vector_add_documents]
     add_documents = OracleAddVectorDocumentsOperator(
         task_id="add_documents",
         table_name=TABLE_NAME,
@@ -88,7 +92,9 @@ with DAG(
             },
         ],
     )
+    # [END howto_operator_oracle_vector_add_documents]
 
+    # [START howto_operator_oracle_vector_create_index]
     create_index = OracleCreateVectorIndexOperator(
         task_id="create_vector_index",
         table_name=TABLE_NAME,
@@ -100,7 +106,9 @@ with DAG(
         ef_construction=200,
         if_not_exists=True,
     )
+    # [END howto_operator_oracle_vector_create_index]
 
+    # [START howto_operator_oracle_vector_search]
     search = OracleVectorSearchOperator(
         task_id="search_documents",
         table_name=TABLE_NAME,
@@ -111,12 +119,15 @@ with DAG(
         include_score=True,
         include_embedding=True,
     )
+    # [END howto_operator_oracle_vector_search]
 
+    # [START howto_operator_oracle_vector_delete_documents]
     delete_documents = OracleDeleteVectorDocumentsOperator(
         task_id="delete_documents",
         table_name=TABLE_NAME,
         ids=["doc-1", "doc-2", "doc-3"],
     )
+    # [END howto_operator_oracle_vector_delete_documents]
 
     search_results = log_search_results(search.output)
     create_table >> add_documents >> create_index >> search >> search_results >> delete_documents
