@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Utilities for Oracle AI Vector Search support."""
+"""
+Utilities for Oracle AI Vector Search support.
+"""
 
 from __future__ import annotations
 
@@ -24,15 +26,30 @@ import re
 from array import array
 from collections.abc import Iterable, Mapping, Sequence
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 import oracledb
 
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
+if TYPE_CHECKING:
+    from oracledb import SparseVector
+
+_SIMPLE_SQL_NAME_PATTERN = r'(?:"[^"]*"|[A-Za-z][A-Za-z0-9_$#]*)'
+_SIMPLE_SQL_NAME_RE = re.compile(rf"^\s*{_SIMPLE_SQL_NAME_PATTERN}\s*$")
+_QUALIFIED_SQL_NAME_RE = re.compile(
+    rf"^\s*{_SIMPLE_SQL_NAME_PATTERN}(?:\s*\.\s*{_SIMPLE_SQL_NAME_PATTERN})*"
+    rf"(?:\s*@\s*{_SIMPLE_SQL_NAME_PATTERN}(?:\s*\.\s*{_SIMPLE_SQL_NAME_PATTERN})*)?\s*$"
+)
+
+DenseVector: TypeAlias = Sequence[int | float] | array
+VectorInput: TypeAlias = "DenseVector | SparseVector"
+VectorValue: TypeAlias = "array | SparseVector"
+VectorResult: TypeAlias = list[int | float] | dict[str, int | list[int] | list[int | float]]
 
 
 class OracleVectorDistance(str, Enum):
-    """Supported Oracle VECTOR_DISTANCE metrics."""
+    """
+    Supported Oracle VECTOR_DISTANCE metrics.
+    """
 
     EUCLIDEAN = "EUCLIDEAN"
     COSINE = "COSINE"
@@ -40,14 +57,18 @@ class OracleVectorDistance(str, Enum):
 
 
 class OracleVectorIndexType(str, Enum):
-    """Supported Oracle vector index organizations."""
+    """
+    Supported Oracle vector index organizations.
+    """
 
     HNSW = "HNSW"
     IVF = "IVF"
 
 
 class OracleVectorFormat(str, Enum):
-    """Supported Oracle VECTOR storage formats."""
+    """
+    Supported Oracle VECTOR storage formats.
+    """
 
     INT8 = "INT8"
     FLOAT32 = "FLOAT32"
@@ -57,33 +78,36 @@ class OracleVectorFormat(str, Enum):
 
 
 def quote_identifier(identifier: str, *, allow_schema: bool = False) -> str:
-    """Return a safely quoted Oracle identifier.
-
-    The Oracle provider must never interpolate untrusted identifiers directly
-    into SQL. Bind variables cannot be used for identifiers, so this helper
-    restricts identifiers to ordinary Oracle identifier characters and quotes
-    each component.
+    """
+    Return an Oracle SQL name unchanged when valid, otherwise quote it safely.
     """
     if not isinstance(identifier, str) or not identifier:
         raise ValueError("Identifier must be a non-empty string")
     if "\x00" in identifier:
         raise ValueError("Identifier contains an invalid null byte")
 
-    parts = identifier.split(".")
-    if len(parts) > 2 or (len(parts) == 2 and not allow_schema):
-        raise ValueError(f"Invalid identifier: {identifier!r}")
+    validator_name = "is_qualified_sql_name" if allow_schema else "is_simple_sql_name"
+    validator = getattr(oracledb, validator_name, None)
+    if validator is not None:
+        is_valid = validator(identifier)
+    else:
+        pattern = _QUALIFIED_SQL_NAME_RE if allow_schema else _SIMPLE_SQL_NAME_RE
+        is_valid = pattern.fullmatch(identifier) is not None
+    if is_valid:
+        return identifier
 
     enquote_name = getattr(oracledb, "enquote_name", None)
-    quoted: list[str] = []
-    for part in parts:
-        if not _IDENTIFIER_RE.fullmatch(part):
-            raise ValueError(f"Unsafe Oracle identifier: {identifier!r}")
-        quoted.append(enquote_name(part) if enquote_name else '"' + part.upper() + '"')
-    return ".".join(quoted)
+    if enquote_name is not None:
+        return enquote_name(identifier)
+    if '"' in identifier:
+        raise ValueError("Identifier contains an embedded double quote")
+    return f'"{identifier.upper()}"'
 
 
 def normalize_distance(distance: OracleVectorDistance | str) -> OracleVectorDistance:
-    """Normalize a user supplied distance metric."""
+    """
+    Normalize a user supplied distance metric.
+    """
     if isinstance(distance, OracleVectorDistance):
         return distance
     try:
@@ -94,7 +118,9 @@ def normalize_distance(distance: OracleVectorDistance | str) -> OracleVectorDist
 
 
 def normalize_index_type(index_type: OracleVectorIndexType | str) -> OracleVectorIndexType:
-    """Normalize a user supplied index type."""
+    """
+    Normalize a user supplied index type.
+    """
     if isinstance(index_type, OracleVectorIndexType):
         return index_type
     try:
@@ -105,7 +131,9 @@ def normalize_index_type(index_type: OracleVectorIndexType | str) -> OracleVecto
 
 
 def normalize_vector_format(vector_format: OracleVectorFormat | str) -> OracleVectorFormat:
-    """Normalize a user supplied vector storage format."""
+    """
+    Normalize a user supplied vector storage format.
+    """
     if isinstance(vector_format, OracleVectorFormat):
         return vector_format
     try:
@@ -115,33 +143,54 @@ def normalize_vector_format(vector_format: OracleVectorFormat | str) -> OracleVe
         raise ValueError(f"Unsupported Oracle vector format {vector_format!r}. Expected one of: {allowed}") from exc
 
 
-def vector_to_list(value: Any) -> list[float]:
-    """Convert an Oracle VECTOR/python-oracledb vector-like value to list[float]."""
+def is_sparse_vector(value: Any) -> bool:
+    """
+    Return whether a value is a python-oracledb sparse vector.
+    """
+    sparse_vector = getattr(oracledb, "SparseVector", None)
+    return sparse_vector is not None and isinstance(value, sparse_vector)
+
+
+def vector_to_result(value: Any) -> VectorResult:
+    """
+    Convert an Oracle VECTOR value to an XCom-safe result.
+    """
     if value is None:
         return []
-    if isinstance(value, list):
-        return [float(v) for v in value]
-    if isinstance(value, tuple):
-        return [float(v) for v in value]
+    if is_sparse_vector(value):
+        return {
+            "num_dimensions": value.num_dimensions,
+            "indices": list(value.indices),
+            "values": list(value.values),
+        }
+    if isinstance(value, (array, list, tuple)):
+        return list(value)
     if hasattr(value, "tolist"):
-        return [float(v) for v in value.tolist()]
+        return list(value.tolist())
     if isinstance(value, str):
         stripped = value.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
-            return [float(v) for v in json.loads(stripped)]
+            result = json.loads(stripped)
+            if isinstance(result, list):
+                return result
     try:
-        return [float(v) for v in value]
+        return list(value)
     except TypeError as exc:
-        raise ValueError(f"Cannot convert value of type {type(value).__name__!r} to vector list") from exc
+        raise ValueError(f"Cannot convert value of type {type(value).__name__!r} to vector result") from exc
 
 
 def vector_to_bind_value(
-    value: Any,
+    value: VectorInput,
     embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
-) -> array:
-    """Convert an embedding to the typed bind value expected by python-oracledb."""
+) -> array | SparseVector:
+    """
+    Convert a convenience dense vector to a python-oracledb bind value.
+    """
+    if is_sparse_vector(value):
+        return cast("SparseVector", value)
+    if isinstance(value, array):
+        return value
     vector_format = normalize_vector_format(embedding_format)
-    values = vector_to_list(value)
     type_code = {
         OracleVectorFormat.FLOAT32: "f",
         OracleVectorFormat.FLOAT64: "d",
@@ -150,18 +199,19 @@ def vector_to_bind_value(
         OracleVectorFormat.FLEXIBLE: "f",
     }[vector_format]
     if vector_format in {OracleVectorFormat.INT8, OracleVectorFormat.BINARY}:
-        if any(not item.is_integer() for item in values):
+        if any(isinstance(item, float) and not item.is_integer() for item in value):
             raise ValueError(f"{vector_format.value} embeddings must contain whole numbers")
-        values = [int(item) for item in values]
-    return array(type_code, values)
+    return array(type_code, value)
 
 
 def coerce_json_dict(value: Any) -> dict[str, Any]:
-    """Convert Oracle JSON/CLOB values to dict."""
+    """
+    Convert Oracle JSON/CLOB values to dict.
+    """
     if value is None:
         return {}
     if isinstance(value, dict):
-        return dict(value)
+        return value
     if hasattr(value, "read"):
         value = value.read()
     if isinstance(value, bytes):
@@ -181,7 +231,9 @@ def coerce_json_dict(value: Any) -> dict[str, Any]:
 
 
 def ensure_json_serializable(value: Mapping[str, Any] | None) -> str:
-    """Serialize metadata as compact JSON object text."""
+    """
+    Serialize metadata as compact JSON object text.
+    """
     if value is None:
         value = {}
     if not isinstance(value, Mapping):
@@ -190,14 +242,18 @@ def ensure_json_serializable(value: Mapping[str, Any] | None) -> str:
 
 
 def materialize_iterable(name: str, value: Iterable[Any] | None) -> list[Any] | None:
-    """Materialize an iterable once so input lengths can be validated."""
+    """
+    Materialize an iterable once so input lengths can be validated.
+    """
     if value is None:
         return None
     return list(value)
 
 
 def require_equal_lengths(**items: Sequence[Any] | None) -> int:
-    """Require all non-None sequences to have identical lengths."""
+    """
+    Require all non-None sequences to have identical lengths.
+    """
     lengths = {name: len(value) for name, value in items.items() if value is not None}
     if not lengths:
         return 0
@@ -210,7 +266,9 @@ def require_equal_lengths(**items: Sequence[Any] | None) -> int:
 
 
 def validate_positive_int(name: str, value: int | None, *, minimum: int = 1, maximum: int | None = None) -> None:
-    """Validate an optional positive integer range."""
+    """
+    Validate an optional positive integer range.
+    """
     if value is None:
         return
     if not isinstance(value, int):
@@ -225,7 +283,7 @@ class OracleJsonFilterBuilder:
     """Translate supported JSON metadata filters into Oracle SQL predicates.
 
     The generated SQL always uses bind variables for values. Only JSON field
-    names and operators are interpreted, and field names are strictly validated.
+    names and operators are interpreted, and field names are safely quoted.
     """
 
     _COMPARISON_OPERATORS = {
@@ -246,7 +304,6 @@ class OracleJsonFilterBuilder:
         "$not",
     }
     _LOGICAL_OPERATORS = {"$and", "$or", "$nor"}
-    _FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
     def __init__(self, metadata_column: str, *, bind_prefix: str = "vf") -> None:
         self.metadata_column = metadata_column
@@ -267,9 +324,7 @@ class OracleJsonFilterBuilder:
         return f":{name}"
 
     def _json_path(self, field: str) -> str:
-        if not self._FIELD_RE.fullmatch(field):
-            raise ValueError(f"Invalid metadata filter field: {field!r}")
-        return "$." + ".".join(field.split("."))
+        return "$." + quote_identifier(field, allow_schema=True)
 
     def _json_value(self, field: str) -> str:
         path = self._json_path(field).replace("'", "''")
@@ -336,11 +391,15 @@ class OracleJsonFilterBuilder:
         if operator == "$lte":
             return f"TO_NUMBER({json_value} DEFAULT NULL ON CONVERSION ERROR) <= {self._new_bind(operand)}"
         if operator == "$between":
-            if not isinstance(operand, Sequence) or isinstance(operand, (str, bytes, bytearray)) or len(operand) != 2:
-                raise ValueError("$between requires a two-item sequence")
+            if isinstance(operand, (str, bytes, bytearray)):
+                raise ValueError("$between requires two values")
+            try:
+                lower, upper = operand
+            except (TypeError, ValueError) as exc:
+                raise ValueError("$between requires two values") from exc
             return (
                 f"TO_NUMBER({json_value} DEFAULT NULL ON CONVERSION ERROR) BETWEEN "
-                f"{self._new_bind(operand[0])} AND {self._new_bind(operand[1])}"
+                f"{self._new_bind(lower)} AND {self._new_bind(upper)}"
             )
         if operator == "$like":
             return f"{json_value} LIKE {self._new_bind(operand)}"

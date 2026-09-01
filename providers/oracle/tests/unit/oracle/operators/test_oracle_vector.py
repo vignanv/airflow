@@ -17,10 +17,12 @@
 
 from __future__ import annotations
 
+from array import array
 from unittest import mock
 
 import pytest
 
+from airflow.providers.oracle import vector
 from airflow.providers.oracle.hooks.oracle_vector import OracleVectorSearchResult
 from airflow.providers.oracle.operators.oracle_vector import (
     OracleAddVectorDocumentsOperator,
@@ -39,6 +41,7 @@ def test_create_vector_table_operator_calls_hook(mock_hook_class):
         table_name="docs",
         embedding_dimension=3,
         embedding_format=OracleVectorFormat.INT8,
+        sparse=True,
     )
     op.execute({})
     mock_hook_class.return_value.create_vector_table.assert_called_once_with(
@@ -49,6 +52,7 @@ def test_create_vector_table_operator_calls_hook(mock_hook_class):
         metadata_column="metadata",
         embedding_column="embedding",
         embedding_format=OracleVectorFormat.INT8,
+        sparse=True,
         if_not_exists=True,
         overwrite=False,
     )
@@ -111,6 +115,29 @@ def test_search_operator_returns_serializable_results(mock_hook_class):
         include_score=True,
         include_embedding=False,
     )
+
+
+@mock.patch("airflow.providers.oracle.operators.oracle_vector.OracleVectorHook")
+def test_search_operator_serializes_sparse_embeddings(mock_hook_class):
+    mock_hook_class.return_value.similarity_search_by_vector.return_value = [
+        OracleVectorSearchResult(
+            id="d1",
+            text="hello",
+            metadata={"source": "unit"},
+            embedding=vector.oracledb.SparseVector(5, [1, 3], array("f", [4.0, 5.0])),
+        )
+    ]
+    op = OracleVectorSearchOperator(task_id="t", table_name="docs", embedding=[1, 2, 3])
+
+    assert op.execute({}) == [
+        {
+            "id": "d1",
+            "text": "hello",
+            "metadata": {"source": "unit"},
+            "distance": None,
+            "embedding": {"num_dimensions": 5, "indices": [1, 3], "values": [4.0, 5.0]},
+        }
+    ]
 
 
 @mock.patch("airflow.providers.oracle.operators.oracle_vector.OracleVectorHook")
