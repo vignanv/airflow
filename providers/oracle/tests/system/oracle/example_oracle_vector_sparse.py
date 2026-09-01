@@ -24,9 +24,9 @@ result, and removes the test documents.
 
 from __future__ import annotations
 
-from array import array
 import datetime
 import os
+from array import array
 from typing import Any
 
 import oracledb
@@ -43,6 +43,7 @@ ORACLE_CONN_ID = os.environ.get("ORACLE_CONN_ID", "oracle_default")
 DOCUMENT_IDS = ["sparse-database", "sparse-analytics"]
 
 
+# [START howto_oracle_vector_sparse]
 @task
 def insert_and_search() -> list[dict[str, Any]]:
     """
@@ -82,6 +83,9 @@ def insert_and_search() -> list[dict[str, Any]]:
         }
         for result in results
     ]
+
+
+# [END howto_oracle_vector_sparse]
 
 
 @task
