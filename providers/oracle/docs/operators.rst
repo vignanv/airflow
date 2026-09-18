@@ -17,10 +17,13 @@
 
 
 
+Operators
+=========
+
 .. _howto/operator:OracleOperator:
 
 SQLExecuteQueryOperator to connect to Oracle
-============================================
+--------------------------------------------
 
 Use the :class:`SQLExecuteQueryOperator<airflow.providers.common.sql.operators.sql>` to execute
 Oracle commands in a `Oracle <https://docs.oracle.com/en/>`__ database.
@@ -77,11 +80,11 @@ For further information, look at:
 .. _howto/operator:OracleVectorOperators:
 
 Oracle AI Vector Search Operators
-=================================
+---------------------------------
 
 The Oracle provider includes operators and a hook for storing documents and
 searching embeddings with Oracle AI Vector Search. The operators use the
-existing :doc:`Oracle connection <howto/connection:oracle>` and default to the
+existing :ref:`Oracle connection <howto/connection:oracle>` and default to the
 ``oracle_default`` connection ID.
 
 Prerequisites
