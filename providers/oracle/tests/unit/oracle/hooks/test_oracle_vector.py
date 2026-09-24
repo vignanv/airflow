@@ -230,10 +230,43 @@ def test_create_vector_table_rejects_overwrite_and_if_not_exists():
         hook.create_vector_table(table_name="docs", embedding_dimension=3, overwrite=True, if_not_exists=True)
 
 
-def test_add_texts_validates_lengths():
+def test_add_texts_rejects_mismatched_lengths():
     hook = RecordingOracleVectorHook()
     with pytest.raises(ValueError):
         hook.add_texts(table_name="docs", texts=["a", "b"], embeddings=[[1, 2, 3]])
+
+
+@mock.patch("airflow.providers.oracle.hooks.oracle_vector.uuid4", side_effect=["generated-1", "generated-2"])
+def test_add_texts_generates_ids_and_uses_empty_metadata(mock_uuid4, monkeypatch):
+    cursor = FakeCursor()
+    conn = FakeConnection(cursor)
+    hook = RecordingOracleVectorHook()
+    monkeypatch.setattr(hook, "get_conn", lambda: conn)
+
+    ids = hook.add_texts(
+        table_name="docs",
+        texts=["hello", "world"],
+        embeddings=[[1, 2, 3], [4, 5, 6]],
+    )
+
+    assert ids == ["generated-1", "generated-2"]
+    assert mock_uuid4.call_count == 2
+    assert cursor.executed_batches == [
+        [
+            {
+                "id": "generated-1",
+                "text": "hello",
+                "metadata": "{}",
+                "embedding": array("f", [1.0, 2.0, 3.0]),
+            },
+            {
+                "id": "generated-2",
+                "text": "world",
+                "metadata": "{}",
+                "embedding": array("f", [4.0, 5.0, 6.0]),
+            },
+        ]
+    ]
 
 
 def test_add_documents_executes_insert_and_commits(monkeypatch):
