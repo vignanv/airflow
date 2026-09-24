@@ -39,7 +39,6 @@ from airflow.providers.oracle.vector import (
     normalize_index_type,
     normalize_vector_format,
     quote_identifier,
-    require_equal_lengths,
     validate_positive_int,
     VectorInput,
     VectorValue,
@@ -168,20 +167,19 @@ class OracleVectorHook(OracleHook):
         if embedding_list is None:
             raise ValueError("embeddings is required for client-side ingestion")
 
-        count = require_equal_lengths(texts=text_list, embeddings=embedding_list, metadatas=metadata_list, ids=id_list)
         if id_list is None:
-            id_list = [str(uuid4()) for _ in range(count)]
+            id_list = [str(uuid4()) for _ in text_list]
         if metadata_list is None:
-            metadata_list = [{} for _ in range(count)]
+            metadata_list = [{} for _ in text_list]
 
         rows = [
             {
-                "id": str(id_list[i]),
-                "text": str(text_list[i]),
-                "metadata": ensure_json_serializable(metadata_list[i]),
-                "embedding": vector_to_bind_value(embedding_list[i], embedding_format),
+                "id": str(id_),
+                "text": str(text),
+                "metadata": ensure_json_serializable(metadata),
+                "embedding": vector_to_bind_value(embedding, embedding_format),
             }
-            for i in range(count)
+            for text, embedding, metadata, id_ in zip(text_list, embedding_list, metadata_list, id_list, strict=True)
         ]
         self._execute_rows(
             self._insert_or_merge_sql(
