@@ -250,21 +250,6 @@ def materialize_iterable(name: str, value: Iterable[Any] | None) -> list[Any] | 
     return list(value)
 
 
-def require_equal_lengths(**items: Sequence[Any] | None) -> int:
-    """
-    Require all non-None sequences to have identical lengths.
-    """
-    lengths = {name: len(value) for name, value in items.items() if value is not None}
-    if not lengths:
-        return 0
-    expected = next(iter(lengths.values()))
-    mismatched = {name: length for name, length in lengths.items() if length != expected}
-    if mismatched:
-        detail = ", ".join(f"{name}={length}" for name, length in sorted(lengths.items()))
-        raise ValueError(f"Input lengths must match: {detail}")
-    return expected
-
-
 def validate_positive_int(name: str, value: int | None, *, minimum: int = 1, maximum: int | None = None) -> None:
     """
     Validate an optional positive integer range.
