@@ -28,21 +28,21 @@ from uuid import uuid4
 
 from airflow.providers.oracle.hooks.oracle import OracleHook
 from airflow.providers.oracle.vector import (
-    OracleJsonFilterBuilder,
     OracleVectorDistance,
     OracleVectorFormat,
     OracleVectorIndexType,
-    coerce_json_dict,
-    ensure_json_serializable,
-    materialize_iterable,
-    normalize_distance,
-    normalize_index_type,
-    normalize_vector_format,
-    quote_identifier,
-    validate_positive_int,
     VectorInput,
     VectorValue,
-    vector_to_bind_value,
+    _OracleJsonFilterBuilder,
+    _coerce_json_dict,
+    _ensure_json_serializable,
+    _materialize_iterable,
+    _normalize_distance,
+    _normalize_index_type,
+    _normalize_vector_format,
+    _quote_identifier,
+    _validate_positive_int,
+    _vector_to_bind_value,
 )
 
 
@@ -101,24 +101,24 @@ class OracleVectorHook(OracleHook):
         """
         Create an Oracle vector table.
         """
-        validate_positive_int("embedding_dimension", embedding_dimension)
-        embedding_format = normalize_vector_format(embedding_format)
+        _validate_positive_int("embedding_dimension", embedding_dimension)
+        embedding_format = _normalize_vector_format(embedding_format)
         if sparse and embedding_format not in {
             OracleVectorFormat.FLOAT32,
             OracleVectorFormat.FLOAT64,
             OracleVectorFormat.INT8,
         }:
             raise ValueError("Sparse vectors support FLOAT32, FLOAT64, and INT8 formats only")
-        quoted_table_name = quote_identifier(table_name, allow_schema=True)
+        quoted_table_name = _quote_identifier(table_name, allow_schema=True)
         if overwrite and if_not_exists:
             raise ValueError("overwrite=True cannot be combined with if_not_exists=True")
         if overwrite:
             self.run(f"DROP TABLE IF EXISTS {quoted_table_name}")
 
-        quoted_id_column = quote_identifier(id_column)
-        quoted_text_column = quote_identifier(text_column)
-        quoted_metadata_column = quote_identifier(metadata_column)
-        quoted_embedding_column = quote_identifier(embedding_column)
+        quoted_id_column = _quote_identifier(id_column)
+        quoted_text_column = _quote_identifier(text_column)
+        quoted_metadata_column = _quote_identifier(metadata_column)
+        quoted_embedding_column = _quote_identifier(embedding_column)
         if_not_exists_sql = " IF NOT EXISTS" if if_not_exists else ""
         sparse_sql = ", SPARSE" if sparse else ""
         sql = f"""CREATE TABLE{if_not_exists_sql} {quoted_table_name} (
@@ -152,12 +152,12 @@ class OracleVectorHook(OracleHook):
         """
         Insert or upsert texts and embeddings into a vector table.
         """
-        validate_positive_int("batch_size", batch_size)
-        text_list = materialize_iterable("texts", texts) or []
-        embedding_list = materialize_iterable("embeddings", embeddings)
-        metadata_list = materialize_iterable("metadatas", metadatas)
-        id_list = materialize_iterable("ids", ids)
-        embedding_format = normalize_vector_format(embedding_format)
+        _validate_positive_int("batch_size", batch_size)
+        text_list = _materialize_iterable("texts", texts) or []
+        embedding_list = _materialize_iterable("embeddings", embeddings)
+        metadata_list = _materialize_iterable("metadatas", metadatas)
+        id_list = _materialize_iterable("ids", ids)
+        embedding_format = _normalize_vector_format(embedding_format)
 
         if embedding_provider_config is not None:
             raise NotImplementedError(
@@ -176,8 +176,8 @@ class OracleVectorHook(OracleHook):
             {
                 "id": str(id_),
                 "text": str(text),
-                "metadata": ensure_json_serializable(metadata),
-                "embedding": vector_to_bind_value(embedding, embedding_format),
+                "metadata": _ensure_json_serializable(metadata),
+                "embedding": _vector_to_bind_value(embedding, embedding_format),
             }
             for text, embedding, metadata, id_ in zip(text_list, embedding_list, metadata_list, id_list, strict=True)
         ]
@@ -254,8 +254,8 @@ class OracleVectorHook(OracleHook):
         """
         if not ids:
             return 0
-        quoted_table_name = quote_identifier(table_name, allow_schema=True)
-        quoted_id_column = quote_identifier(id_column)
+        quoted_table_name = _quote_identifier(table_name, allow_schema=True)
+        quoted_id_column = _quote_identifier(id_column)
         rows = [{"id": str(item)} for item in ids]
         sql = f"DELETE FROM {quoted_table_name} WHERE {quoted_id_column} = :id"
         return self._execute_rows(sql, rows, batch_size=1000)
@@ -276,11 +276,11 @@ class OracleVectorHook(OracleHook):
         """
         if not ids:
             return []
-        quoted_table_name = quote_identifier(table_name, allow_schema=True)
-        quoted_id_column = quote_identifier(id_column)
-        quoted_text_column = quote_identifier(text_column)
-        quoted_metadata_column = quote_identifier(metadata_column)
-        quoted_embedding_column = quote_identifier(embedding_column)
+        quoted_table_name = _quote_identifier(table_name, allow_schema=True)
+        quoted_id_column = _quote_identifier(id_column)
+        quoted_text_column = _quote_identifier(text_column)
+        quoted_metadata_column = _quote_identifier(metadata_column)
+        quoted_embedding_column = _quote_identifier(embedding_column)
         placeholders = ", ".join(f":id_{i}" for i in range(len(ids)))
         binds = {f"id_{i}": str(value) for i, value in enumerate(ids)}
         select_columns = [
@@ -324,14 +324,14 @@ class OracleVectorHook(OracleHook):
         """
         Run Oracle VECTOR_DISTANCE search by query vector.
         """
-        validate_positive_int("k", k)
-        distance = normalize_distance(distance)
-        quoted_table_name = quote_identifier(table_name, allow_schema=True)
-        quoted_id_column = quote_identifier(id_column)
-        quoted_text_column = quote_identifier(text_column)
-        quoted_metadata_column = quote_identifier(metadata_column)
-        quoted_embedding_column = quote_identifier(embedding_column)
-        filter_builder = OracleJsonFilterBuilder(quoted_metadata_column)
+        _validate_positive_int("k", k)
+        distance = _normalize_distance(distance)
+        quoted_table_name = _quote_identifier(table_name, allow_schema=True)
+        quoted_id_column = _quote_identifier(id_column)
+        quoted_text_column = _quote_identifier(text_column)
+        quoted_metadata_column = _quote_identifier(metadata_column)
+        quoted_embedding_column = _quote_identifier(embedding_column)
+        filter_builder = _OracleJsonFilterBuilder(quoted_metadata_column)
         where_clause, filter_binds = filter_builder.build(filter)
         where_sql = f"WHERE {where_clause}" if where_clause else ""
         score_sql = f"VECTOR_DISTANCE({quoted_embedding_column}, :query_embedding, {distance.value})"
@@ -352,7 +352,7 @@ class OracleVectorHook(OracleHook):
             FETCH FIRST :k ROWS ONLY
         """
         binds = {
-            "query_embedding": vector_to_bind_value(embedding, embedding_format),
+            "query_embedding": _vector_to_bind_value(embedding, embedding_format),
             "k": int(k),
             **filter_binds,
         }
@@ -432,21 +432,21 @@ class OracleVectorHook(OracleHook):
         """
         Create an HNSW or IVF vector index.
         """
-        index_type = normalize_index_type(index_type)
-        distance = normalize_distance(distance)
-        validate_positive_int("accuracy", accuracy, minimum=1, maximum=100)
-        validate_positive_int("parallel", parallel)
-        validate_positive_int("neighbors", neighbors, minimum=2, maximum=2048)
-        validate_positive_int("ef_construction", ef_construction, minimum=1, maximum=65535)
-        validate_positive_int("neighbor_partitions", neighbor_partitions, minimum=1, maximum=10_000_000)
+        index_type = _normalize_index_type(index_type)
+        distance = _normalize_distance(distance)
+        _validate_positive_int("accuracy", accuracy, minimum=1, maximum=100)
+        _validate_positive_int("parallel", parallel)
+        _validate_positive_int("neighbors", neighbors, minimum=2, maximum=2048)
+        _validate_positive_int("ef_construction", ef_construction, minimum=1, maximum=65535)
+        _validate_positive_int("neighbor_partitions", neighbor_partitions, minimum=1, maximum=10_000_000)
         if index_type == OracleVectorIndexType.HNSW and neighbor_partitions is not None:
             raise ValueError("neighbor_partitions is only valid for IVF indexes")
         if index_type == OracleVectorIndexType.IVF and (neighbors is not None or ef_construction is not None):
             raise ValueError("neighbors and ef_construction are only valid for HNSW indexes")
 
-        quoted_index_name = quote_identifier(index_name)
-        quoted_table_name = quote_identifier(table_name, allow_schema=True)
-        quoted_embedding_column = quote_identifier(embedding_column)
+        quoted_index_name = _quote_identifier(index_name)
+        quoted_table_name = _quote_identifier(table_name, allow_schema=True)
+        quoted_embedding_column = _quote_identifier(embedding_column)
         if_not_exists_sql = " IF NOT EXISTS" if if_not_exists else ""
         parts = [
             f"CREATE VECTOR INDEX{if_not_exists_sql} {quoted_index_name} "
@@ -475,7 +475,7 @@ class OracleVectorHook(OracleHook):
         """
         Drop a vector index.
         """
-        self.run(f"DROP INDEX IF EXISTS {quote_identifier(index_name)}")
+        self.run(f"DROP INDEX IF EXISTS {_quote_identifier(index_name)}")
 
     # ------------------------------------------------------------------
     # APIs planned for a future release.
@@ -508,11 +508,11 @@ class OracleVectorHook(OracleHook):
         embedding_column: str,
         mutate_on_duplicate: bool,
     ) -> str:
-        quoted_table_name = quote_identifier(table_name, allow_schema=True)
-        quoted_id_column = quote_identifier(id_column)
-        quoted_text_column = quote_identifier(text_column)
-        quoted_metadata_column = quote_identifier(metadata_column)
-        quoted_embedding_column = quote_identifier(embedding_column)
+        quoted_table_name = _quote_identifier(table_name, allow_schema=True)
+        quoted_id_column = _quote_identifier(id_column)
+        quoted_text_column = _quote_identifier(text_column)
+        quoted_metadata_column = _quote_identifier(metadata_column)
+        quoted_embedding_column = _quote_identifier(embedding_column)
         if mutate_on_duplicate:
             return f"""
                 MERGE INTO {quoted_table_name} tgt
@@ -571,7 +571,7 @@ class OracleVectorHook(OracleHook):
         idx += 1
         text = str(row[idx])
         idx += 1
-        metadata = coerce_json_dict(row[idx])
+        metadata = _coerce_json_dict(row[idx])
         idx += 1
         distance = None
         if include_score:

@@ -24,7 +24,7 @@ import pytest
 
 from airflow.providers.oracle import vector
 from airflow.providers.oracle.hooks.oracle_vector import OracleVectorDocument, OracleVectorHook
-from airflow.providers.oracle.vector import OracleJsonFilterBuilder, OracleVectorFormat, quote_identifier
+from airflow.providers.oracle.vector import _OracleJsonFilterBuilder, _quote_identifier, OracleVectorFormat
 
 
 class FakeCursor:
@@ -105,14 +105,14 @@ class RecordingOracleVectorHook(OracleVectorHook):
     ],
 )
 def test_quote_identifier_returns_valid_driver_names_unchanged(identifier, allow_schema):
-    assert quote_identifier(identifier, allow_schema=allow_schema) == identifier
+    assert _quote_identifier(identifier, allow_schema=allow_schema) == identifier
 
 
 @mock.patch.object(vector.oracledb, "is_simple_sql_name", new=None, create=True)
 @mock.patch.object(vector.oracledb, "is_qualified_sql_name", new=None, create=True)
 def test_quote_identifier_uses_compatibility_validation_for_older_drivers():
-    assert quote_identifier("docs") == "docs"
-    assert quote_identifier('"owner.with.periods"."table.with.periods"', allow_schema=True) == (
+    assert _quote_identifier("docs") == "docs"
+    assert _quote_identifier('"owner.with.periods"."table.with.periods"', allow_schema=True) == (
         '"owner.with.periods"."table.with.periods"'
     )
 
@@ -128,7 +128,7 @@ def test_quote_identifier_uses_compatibility_validation_for_older_drivers():
     ],
 )
 def test_quote_identifier_quotes_invalid_names(identifier, allow_schema, expected):
-    assert quote_identifier(identifier, allow_schema=allow_schema) == expected
+    assert _quote_identifier(identifier, allow_schema=allow_schema) == expected
 
 
 def test_create_vector_table_emits_expected_ddl():
@@ -393,21 +393,21 @@ def test_similarity_search_by_vector_preserves_sparse_query_embedding(monkeypatc
     ],
 )
 def test_vector_to_bind_value_uses_type_matching_vector_format(embedding_format, embedding, expected):
-    assert vector.vector_to_bind_value(embedding, embedding_format) == expected
+    assert vector._vector_to_bind_value(embedding, embedding_format) == expected
 
 
 @pytest.mark.parametrize("embedding_format", [OracleVectorFormat.INT8, OracleVectorFormat.BINARY])
 def test_vector_to_bind_value_rejects_fractional_integer_embeddings(embedding_format):
     with pytest.raises(ValueError, match="must contain whole numbers"):
-        vector.vector_to_bind_value([1.5], embedding_format)
+        vector._vector_to_bind_value([1.5], embedding_format)
 
 
 def test_vector_to_bind_value_preserves_native_driver_vectors():
     dense_vector = array("d", [1.0, 2.0, 3.0])
     sparse_vector = vector.oracledb.SparseVector(5, [1, 3], array("b", [4, 5]))
 
-    assert vector.vector_to_bind_value(dense_vector) is dense_vector
-    assert vector.vector_to_bind_value(sparse_vector) is sparse_vector
+    assert vector._vector_to_bind_value(dense_vector) is dense_vector
+    assert vector._vector_to_bind_value(sparse_vector) is sparse_vector
 
 
 def test_vector_to_result_serializes_sparse_vector():
@@ -423,7 +423,7 @@ def test_vector_to_result_serializes_sparse_vector():
 def test_coerce_json_dict_returns_existing_dict():
     metadata = {"source": "unit"}
 
-    assert vector.coerce_json_dict(metadata) is metadata
+    assert vector._coerce_json_dict(metadata) is metadata
 
 
 def test_get_by_ids_can_include_embedding(monkeypatch):
@@ -474,7 +474,7 @@ def test_delete_executes_delete(monkeypatch):
 
 
 def test_filter_builder_logical_operators():
-    builder = OracleJsonFilterBuilder('"METADATA"')
+    builder = _OracleJsonFilterBuilder('"METADATA"')
     clause, binds = builder.build({"$and": [{"source": "unit"}, {"version": {"$gte": 2}}]})
     assert "JSON_VALUE" in clause
     assert "AND" in clause
@@ -483,7 +483,7 @@ def test_filter_builder_logical_operators():
 
 
 def test_filter_builder_supports_quoted_field_names():
-    builder = OracleJsonFilterBuilder("metadata")
+    builder = _OracleJsonFilterBuilder("metadata")
 
     clause, binds = builder.build({'"source.version"': "unit"})
 
@@ -492,7 +492,7 @@ def test_filter_builder_supports_quoted_field_names():
 
 
 def test_filter_builder_accepts_iterable_between_bounds():
-    builder = OracleJsonFilterBuilder("metadata")
+    builder = _OracleJsonFilterBuilder("metadata")
 
     clause, binds = builder.build({"version": {"$between": iter((1, 2))}})
 
@@ -501,7 +501,7 @@ def test_filter_builder_accepts_iterable_between_bounds():
 
 
 def test_filter_builder_rejects_unknown_operator():
-    builder = OracleJsonFilterBuilder('"METADATA"')
+    builder = _OracleJsonFilterBuilder('"METADATA"')
     with pytest.raises(ValueError):
         builder.build({"source": {"$bad": "x"}})
 
