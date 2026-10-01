@@ -45,6 +45,17 @@ VectorInput: TypeAlias = "DenseVector | SparseVector"
 VectorValue: TypeAlias = "array | SparseVector"
 VectorResult: TypeAlias = list[int | float] | dict[str, int | list[int] | list[int | float]]
 
+__all__ = [
+    "DenseVector",
+    "OracleVectorDistance",
+    "OracleVectorFormat",
+    "OracleVectorIndexType",
+    "VectorInput",
+    "VectorResult",
+    "VectorValue",
+    "vector_to_result",
+]
+
 
 class OracleVectorDistance(str, Enum):
     """
@@ -77,7 +88,7 @@ class OracleVectorFormat(str, Enum):
     FLEXIBLE = "*"
 
 
-def quote_identifier(identifier: str, *, allow_schema: bool = False) -> str:
+def _quote_identifier(identifier: str, *, allow_schema: bool = False) -> str:
     """
     Return an Oracle SQL name unchanged when valid, otherwise quote it safely.
     """
@@ -104,7 +115,7 @@ def quote_identifier(identifier: str, *, allow_schema: bool = False) -> str:
     return f'"{identifier.upper()}"'
 
 
-def normalize_distance(distance: OracleVectorDistance | str) -> OracleVectorDistance:
+def _normalize_distance(distance: OracleVectorDistance | str) -> OracleVectorDistance:
     """
     Normalize a user supplied distance metric.
     """
@@ -117,7 +128,7 @@ def normalize_distance(distance: OracleVectorDistance | str) -> OracleVectorDist
         raise ValueError(f"Unsupported Oracle vector distance {distance!r}. Expected one of: {allowed}") from exc
 
 
-def normalize_index_type(index_type: OracleVectorIndexType | str) -> OracleVectorIndexType:
+def _normalize_index_type(index_type: OracleVectorIndexType | str) -> OracleVectorIndexType:
     """
     Normalize a user supplied index type.
     """
@@ -130,7 +141,7 @@ def normalize_index_type(index_type: OracleVectorIndexType | str) -> OracleVecto
         raise ValueError(f"Unsupported Oracle vector index type {index_type!r}. Expected one of: {allowed}") from exc
 
 
-def normalize_vector_format(vector_format: OracleVectorFormat | str) -> OracleVectorFormat:
+def _normalize_vector_format(vector_format: OracleVectorFormat | str) -> OracleVectorFormat:
     """
     Normalize a user supplied vector storage format.
     """
@@ -143,7 +154,7 @@ def normalize_vector_format(vector_format: OracleVectorFormat | str) -> OracleVe
         raise ValueError(f"Unsupported Oracle vector format {vector_format!r}. Expected one of: {allowed}") from exc
 
 
-def is_sparse_vector(value: Any) -> bool:
+def _is_sparse_vector(value: Any) -> bool:
     """
     Return whether a value is a python-oracledb sparse vector.
     """
@@ -157,7 +168,7 @@ def vector_to_result(value: Any) -> VectorResult:
     """
     if value is None:
         return []
-    if is_sparse_vector(value):
+    if _is_sparse_vector(value):
         return {
             "num_dimensions": value.num_dimensions,
             "indices": list(value.indices),
@@ -179,18 +190,18 @@ def vector_to_result(value: Any) -> VectorResult:
         raise ValueError(f"Cannot convert value of type {type(value).__name__!r} to vector result") from exc
 
 
-def vector_to_bind_value(
+def _vector_to_bind_value(
     value: VectorInput,
     embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
 ) -> array | SparseVector:
     """
     Convert a convenience dense vector to a python-oracledb bind value.
     """
-    if is_sparse_vector(value):
+    if _is_sparse_vector(value):
         return cast("SparseVector", value)
     if isinstance(value, array):
         return value
-    vector_format = normalize_vector_format(embedding_format)
+    vector_format = _normalize_vector_format(embedding_format)
     type_code = {
         OracleVectorFormat.FLOAT32: "f",
         OracleVectorFormat.FLOAT64: "d",
@@ -204,7 +215,7 @@ def vector_to_bind_value(
     return array(type_code, value)
 
 
-def coerce_json_dict(value: Any) -> dict[str, Any]:
+def _coerce_json_dict(value: Any) -> dict[str, Any]:
     """
     Convert Oracle JSON/CLOB values to dict.
     """
@@ -230,7 +241,7 @@ def coerce_json_dict(value: Any) -> dict[str, Any]:
     raise ValueError(f"Cannot convert value of type {type(value).__name__!r} to metadata dict")
 
 
-def ensure_json_serializable(value: Mapping[str, Any] | None) -> str:
+def _ensure_json_serializable(value: Mapping[str, Any] | None) -> str:
     """
     Serialize metadata as compact JSON object text.
     """
@@ -241,7 +252,7 @@ def ensure_json_serializable(value: Mapping[str, Any] | None) -> str:
     return json.dumps(dict(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
-def materialize_iterable(name: str, value: Iterable[Any] | None) -> list[Any] | None:
+def _materialize_iterable(name: str, value: Iterable[Any] | None) -> list[Any] | None:
     """
     Materialize an iterable once so input lengths can be validated.
     """
@@ -250,7 +261,7 @@ def materialize_iterable(name: str, value: Iterable[Any] | None) -> list[Any] | 
     return list(value)
 
 
-def validate_positive_int(name: str, value: int | None, *, minimum: int = 1, maximum: int | None = None) -> None:
+def _validate_positive_int(name: str, value: int | None, *, minimum: int = 1, maximum: int | None = None) -> None:
     """
     Validate an optional positive integer range.
     """
@@ -264,7 +275,7 @@ def validate_positive_int(name: str, value: int | None, *, minimum: int = 1, max
         raise ValueError(f"{name} must be <= {maximum}")
 
 
-class OracleJsonFilterBuilder:
+class _OracleJsonFilterBuilder:
     """Translate supported JSON metadata filters into Oracle SQL predicates.
 
     The generated SQL always uses bind variables for values. Only JSON field
@@ -309,7 +320,7 @@ class OracleJsonFilterBuilder:
         return f":{name}"
 
     def _json_path(self, field: str) -> str:
-        return "$." + quote_identifier(field, allow_schema=True)
+        return "$." + _quote_identifier(field, allow_schema=True)
 
     def _json_value(self, field: str) -> str:
         path = self._json_path(field).replace("'", "''")
