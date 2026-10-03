@@ -83,7 +83,7 @@ def test_add_documents_operator_calls_hook(mock_hook_class):
 
 
 def test_add_documents_operator_requires_source():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Either documents or documents_callable must be supplied"):
         OracleAddVectorDocumentsOperator(task_id="t", table_name="docs")
 
 
@@ -158,4 +158,6 @@ def test_delete_operator_calls_hook(mock_hook_class):
     mock_hook_class.return_value.delete.return_value = 2
     op = OracleDeleteVectorDocumentsOperator(task_id="t", table_name="docs", ids=["d1", "d2"])
     assert op.execute({}) == 2
-    mock_hook_class.return_value.delete.assert_called_once_with(table_name="docs", ids=["d1", "d2"], id_column="id")
+    mock_hook_class.return_value.delete.assert_called_once_with(
+        table_name="docs", ids=["d1", "d2"], id_column="id"
+    )
