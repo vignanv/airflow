@@ -15,9 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""
-Oracle AI Vector Search operators.
-"""
+"""Oracle AI Vector Search operators."""
 
 from __future__ import annotations
 
@@ -39,11 +37,9 @@ if TYPE_CHECKING:
 
 
 class OracleCreateVectorTableOperator(BaseOperator):
-    """
-    Create an Oracle vector table.
-    """
+    """Create an Oracle vector table."""
 
-    template_fields: Sequence[str] = ("table_name",)
+    template_fields: Sequence[str] = ("table_name", "oracle_conn_id")
 
     def __init__(
         self,
@@ -91,18 +87,17 @@ class OracleCreateVectorTableOperator(BaseOperator):
 
 
 class OracleAddVectorDocumentsOperator(BaseOperator):
-    """
-    Add documents to an Oracle vector table.
-    """
+    """Add documents to an Oracle vector table."""
 
-    template_fields: Sequence[str] = ("table_name",)
+    template_fields: Sequence[str] = ("table_name", "oracle_conn_id")
 
     def __init__(
         self,
         *,
         table_name: str,
         documents: Sequence[OracleVectorDocument | Mapping[str, Any]] | None = None,
-        documents_callable: Callable[[Context], Sequence[OracleVectorDocument | Mapping[str, Any]]] | None = None,
+        documents_callable: Callable[[Context], Sequence[OracleVectorDocument | Mapping[str, Any]]]
+        | None = None,
         oracle_conn_id: str = "oracle_default",
         id_column: str = "id",
         text_column: str = "text",
@@ -150,11 +145,9 @@ class OracleAddVectorDocumentsOperator(BaseOperator):
 
 
 class OracleVectorSearchOperator(BaseOperator):
-    """
-    Run Oracle vector similarity search and return XCom-safe dictionaries.
-    """
+    """Run Oracle vector similarity search and return XCom-safe dictionaries."""
 
-    template_fields: Sequence[str] = ("table_name", "query")
+    template_fields: Sequence[str] = ("table_name", "oracle_conn_id", "query")
 
     def __init__(
         self,
@@ -242,11 +235,9 @@ class OracleVectorSearchOperator(BaseOperator):
 
 
 class OracleCreateVectorIndexOperator(BaseOperator):
-    """
-    Create an Oracle HNSW or IVF vector index.
-    """
+    """Create an Oracle HNSW or IVF vector index."""
 
-    template_fields: Sequence[str] = ("table_name", "index_name")
+    template_fields: Sequence[str] = ("table_name", "oracle_conn_id", "index_name")
 
     def __init__(
         self,
@@ -297,11 +288,9 @@ class OracleCreateVectorIndexOperator(BaseOperator):
 
 
 class OracleDeleteVectorDocumentsOperator(BaseOperator):
-    """
-    Delete vector documents by id.
-    """
+    """Delete vector documents by id."""
 
-    template_fields: Sequence[str] = ("table_name",)
+    template_fields: Sequence[str] = ("table_name", "oracle_conn_id")
 
     def __init__(
         self,
