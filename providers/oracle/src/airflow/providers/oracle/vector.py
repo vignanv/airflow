@@ -15,9 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""
-Utilities for Oracle AI Vector Search support.
-"""
+"""Utilities for Oracle AI Vector Search support."""
 
 from __future__ import annotations
 
@@ -58,9 +56,7 @@ __all__ = [
 
 
 class OracleVectorDistance(str, Enum):
-    """
-    Supported Oracle VECTOR_DISTANCE metrics.
-    """
+    """Supported Oracle VECTOR_DISTANCE metrics."""
 
     EUCLIDEAN = "EUCLIDEAN"
     COSINE = "COSINE"
@@ -68,18 +64,14 @@ class OracleVectorDistance(str, Enum):
 
 
 class OracleVectorIndexType(str, Enum):
-    """
-    Supported Oracle vector index organizations.
-    """
+    """Supported Oracle vector index organizations."""
 
     HNSW = "HNSW"
     IVF = "IVF"
 
 
 class OracleVectorFormat(str, Enum):
-    """
-    Supported Oracle VECTOR storage formats.
-    """
+    """Supported Oracle VECTOR storage formats."""
 
     INT8 = "INT8"
     FLOAT32 = "FLOAT32"
@@ -89,9 +81,7 @@ class OracleVectorFormat(str, Enum):
 
 
 def _quote_identifier(identifier: str, *, allow_schema: bool = False) -> str:
-    """
-    Return an Oracle SQL name unchanged when valid, otherwise quote it safely.
-    """
+    """Return an Oracle SQL name unchanged when valid, otherwise quote it safely."""
     if not isinstance(identifier, str) or not identifier:
         raise ValueError("Identifier must be a non-empty string")
     if "\x00" in identifier:
@@ -116,56 +106,52 @@ def _quote_identifier(identifier: str, *, allow_schema: bool = False) -> str:
 
 
 def _normalize_distance(distance: OracleVectorDistance | str) -> OracleVectorDistance:
-    """
-    Normalize a user supplied distance metric.
-    """
+    """Normalize a user supplied distance metric."""
     if isinstance(distance, OracleVectorDistance):
         return distance
     try:
         return OracleVectorDistance(str(distance).upper())
     except ValueError as exc:
         allowed = ", ".join(item.value for item in OracleVectorDistance)
-        raise ValueError(f"Unsupported Oracle vector distance {distance!r}. Expected one of: {allowed}") from exc
+        raise ValueError(
+            f"Unsupported Oracle vector distance {distance!r}. Expected one of: {allowed}"
+        ) from exc
 
 
 def _normalize_index_type(index_type: OracleVectorIndexType | str) -> OracleVectorIndexType:
-    """
-    Normalize a user supplied index type.
-    """
+    """Normalize a user supplied index type."""
     if isinstance(index_type, OracleVectorIndexType):
         return index_type
     try:
         return OracleVectorIndexType(str(index_type).upper())
     except ValueError as exc:
         allowed = ", ".join(item.value for item in OracleVectorIndexType)
-        raise ValueError(f"Unsupported Oracle vector index type {index_type!r}. Expected one of: {allowed}") from exc
+        raise ValueError(
+            f"Unsupported Oracle vector index type {index_type!r}. Expected one of: {allowed}"
+        ) from exc
 
 
 def _normalize_vector_format(vector_format: OracleVectorFormat | str) -> OracleVectorFormat:
-    """
-    Normalize a user supplied vector storage format.
-    """
+    """Normalize a user supplied vector storage format."""
     if isinstance(vector_format, OracleVectorFormat):
         return vector_format
     try:
         return OracleVectorFormat(str(vector_format).upper())
     except ValueError as exc:
         allowed = ", ".join(item.value for item in OracleVectorFormat)
-        raise ValueError(f"Unsupported Oracle vector format {vector_format!r}. Expected one of: {allowed}") from exc
+        raise ValueError(
+            f"Unsupported Oracle vector format {vector_format!r}. Expected one of: {allowed}"
+        ) from exc
 
 
 def _is_sparse_vector(value: Any) -> bool:
-    """
-    Return whether a value is a python-oracledb sparse vector.
-    """
+    """Return whether a value is a python-oracledb sparse vector."""
     sparse_vector = getattr(oracledb, "SparseVector", None)
     return sparse_vector is not None and isinstance(value, sparse_vector)
 
 
 def vector_to_result(value: Any) -> VectorResult:
-    """
-    Convert an Oracle VECTOR value to an XCom-safe result.
-    """
+    """Convert an Oracle VECTOR value to an XCom-safe result."""
     if value is None:
         return []
     if _is_sparse_vector(value):
@@ -194,9 +180,7 @@ def _vector_to_bind_value(
     value: VectorInput,
     embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
 ) -> array | SparseVector:
-    """
-    Convert a convenience dense vector to a python-oracledb bind value.
-    """
+    """Convert a convenience dense vector to a python-oracledb bind value."""
     if _is_sparse_vector(value):
         return cast("SparseVector", value)
     if isinstance(value, array):
@@ -216,9 +200,7 @@ def _vector_to_bind_value(
 
 
 def _coerce_json_dict(value: Any) -> dict[str, Any]:
-    """
-    Convert Oracle JSON/CLOB values to dict.
-    """
+    """Convert Oracle JSON/CLOB values to dict."""
     if value is None:
         return {}
     if isinstance(value, dict):
@@ -242,9 +224,7 @@ def _coerce_json_dict(value: Any) -> dict[str, Any]:
 
 
 def _ensure_json_serializable(value: Mapping[str, Any] | None) -> str:
-    """
-    Serialize metadata as compact JSON object text.
-    """
+    """Serialize metadata as compact JSON object text."""
     if value is None:
         value = {}
     if not isinstance(value, Mapping):
@@ -253,18 +233,16 @@ def _ensure_json_serializable(value: Mapping[str, Any] | None) -> str:
 
 
 def _materialize_iterable(name: str, value: Iterable[Any] | None) -> list[Any] | None:
-    """
-    Materialize an iterable once so input lengths can be validated.
-    """
+    """Materialize an iterable once so input lengths can be validated."""
     if value is None:
         return None
     return list(value)
 
 
-def _validate_positive_int(name: str, value: int | None, *, minimum: int = 1, maximum: int | None = None) -> None:
-    """
-    Validate an optional positive integer range.
-    """
+def _validate_positive_int(
+    name: str, value: int | None, *, minimum: int = 1, maximum: int | None = None
+) -> None:
+    """Validate an optional positive integer range."""
     if value is None:
         return
     if not isinstance(value, int):
@@ -276,7 +254,8 @@ def _validate_positive_int(name: str, value: int | None, *, minimum: int = 1, ma
 
 
 class _OracleJsonFilterBuilder:
-    """Translate supported JSON metadata filters into Oracle SQL predicates.
+    """
+    Translate supported JSON metadata filters into Oracle SQL predicates.
 
     The generated SQL always uses bind variables for values. Only JSON field
     names and operators are interpreted, and field names are safely quoted.

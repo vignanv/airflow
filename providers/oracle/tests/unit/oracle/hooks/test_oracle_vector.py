@@ -24,7 +24,7 @@ import pytest
 
 from airflow.providers.oracle import vector
 from airflow.providers.oracle.hooks.oracle_vector import OracleVectorDocument, OracleVectorHook
-from airflow.providers.oracle.vector import _OracleJsonFilterBuilder, _quote_identifier, OracleVectorFormat
+from airflow.providers.oracle.vector import OracleVectorFormat, _OracleJsonFilterBuilder, _quote_identifier
 
 
 class FakeCursor:
@@ -226,13 +226,13 @@ def test_create_vector_table_rejects_sparse_vector_with_unsupported_format(embed
 
 def test_create_vector_table_rejects_overwrite_and_if_not_exists():
     hook = RecordingOracleVectorHook()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="overwrite=True cannot be combined with if_not_exists=True"):
         hook.create_vector_table(table_name="docs", embedding_dimension=3, overwrite=True, if_not_exists=True)
 
 
 def test_add_texts_rejects_mismatched_lengths():
     hook = RecordingOracleVectorHook()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"zip\(\) argument 2 is shorter than argument 1"):
         hook.add_texts(table_name="docs", texts=["a", "b"], embeddings=[[1, 2, 3]])
 
 
@@ -277,12 +277,8 @@ def test_add_documents_executes_insert_and_commits(monkeypatch):
     ids = hook.add_documents(
         table_name="docs",
         documents=[
-            OracleVectorDocument(
-                id="d1", text="hello", metadata={"source": "unit"}, embedding=[1, 2, 3]
-            ),
-            OracleVectorDocument(
-                id="d2", text="world", metadata={"source": "unit"}, embedding=[4, 5, 6]
-            ),
+            OracleVectorDocument(id="d1", text="hello", metadata={"source": "unit"}, embedding=[1, 2, 3]),
+            OracleVectorDocument(id="d2", text="world", metadata={"source": "unit"}, embedding=[4, 5, 6]),
         ],
     )
     assert ids == ["d1", "d2"]
@@ -487,7 +483,7 @@ def test_filter_builder_supports_quoted_field_names():
 
     clause, binds = builder.build({'"source.version"': "unit"})
 
-    assert "$.\"source.version\"" in clause
+    assert '$."source.version"' in clause
     assert binds == {"vf_1": "unit"}
 
 
@@ -502,7 +498,7 @@ def test_filter_builder_accepts_iterable_between_bounds():
 
 def test_filter_builder_rejects_unknown_operator():
     builder = _OracleJsonFilterBuilder('"METADATA"')
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"Unsupported metadata filter operator: \$bad"):
         builder.build({"source": {"$bad": "x"}})
 
 
@@ -550,7 +546,9 @@ def test_drop_vector_index_uses_if_exists_ddl():
 
 def test_create_index_validates_parameter_combinations():
     hook = RecordingOracleVectorHook()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="neighbors and ef_construction are only valid for HNSW indexes"):
         hook.create_vector_index(table_name="docs", index_name="idx", index_type="IVF", neighbors=10)
-    with pytest.raises(ValueError):
-        hook.create_vector_index(table_name="docs", index_name="idx", index_type="HNSW", neighbor_partitions=10)
+    with pytest.raises(ValueError, match="neighbor_partitions is only valid for IVF indexes"):
+        hook.create_vector_index(
+            table_name="docs", index_name="idx", index_type="HNSW", neighbor_partitions=10
+        )
