@@ -1181,6 +1181,7 @@ NetworkPolicy
 newsfragments
 NFS
 nginx
+nin
 nobr
 nodash
 Nodegroup
