@@ -131,6 +131,8 @@ class OracleVectorHook(OracleHook):
         total = 0
         with self.get_conn() as conn:
             with conn.cursor() as cursor:
+                # Keep manual batching while Airflow supports python-oracledb versions before 3.4,
+                # which added Cursor.executemany(batch_size=...).
                 for start in range(0, len(rows), batch_size):
                     batch = list(rows[start : start + batch_size])
                     cursor.executemany(sql, batch)
