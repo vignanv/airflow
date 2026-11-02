@@ -79,9 +79,26 @@ class OracleVectorFormat(str, Enum):
     BINARY = "BINARY"
     FLEXIBLE = "*"
 
+    @property
+    def array_type_code(self) -> str:
+        """Return the Python array type code for this vector format."""
+        return {
+            OracleVectorFormat.INT8: "b",
+            OracleVectorFormat.FLOAT32: "f",
+            OracleVectorFormat.FLOAT64: "d",
+            OracleVectorFormat.BINARY: "B",
+            OracleVectorFormat.FLEXIBLE: "f",
+        }[self]
+
 
 def _quote_identifier(identifier: str, *, allow_schema: bool = False) -> str:
-    """Return an Oracle SQL name unchanged when valid, otherwise quote it safely."""
+    """
+    Return an Oracle SQL name unchanged when valid, otherwise quote it safely.
+
+    Use python-oracledb's SQL-name validation and quoting helpers when they are
+    available. Compatibility validation and quoting support older python-oracledb
+    versions supported by the provider.
+    """
     if not isinstance(identifier, str) or not identifier:
         raise ValueError("Identifier must be a non-empty string")
     if "\x00" in identifier:
@@ -186,17 +203,10 @@ def _vector_to_bind_value(
     if isinstance(value, array):
         return value
     vector_format = _normalize_vector_format(embedding_format)
-    type_code = {
-        OracleVectorFormat.FLOAT32: "f",
-        OracleVectorFormat.FLOAT64: "d",
-        OracleVectorFormat.INT8: "b",
-        OracleVectorFormat.BINARY: "B",
-        OracleVectorFormat.FLEXIBLE: "f",
-    }[vector_format]
     if vector_format in {OracleVectorFormat.INT8, OracleVectorFormat.BINARY}:
         if any(isinstance(item, float) and not item.is_integer() for item in value):
             raise ValueError(f"{vector_format.value} embeddings must contain whole numbers")
-    return array(type_code, value)
+    return array(vector_format.array_type_code, value)
 
 
 def _coerce_json_dict(value: Any) -> dict[str, Any]:

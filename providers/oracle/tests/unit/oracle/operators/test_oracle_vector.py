@@ -155,9 +155,9 @@ def test_create_index_operator_calls_hook(mock_hook_class):
 
 @mock.patch("airflow.providers.oracle.operators.oracle_vector.OracleVectorHook")
 def test_delete_operator_calls_hook(mock_hook_class):
-    mock_hook_class.return_value.delete.return_value = 2
+    mock_hook_class.return_value.delete_documents.return_value = 2
     op = OracleDeleteVectorDocumentsOperator(task_id="t", table_name="docs", ids=["d1", "d2"])
     assert op.execute({}) == 2
-    mock_hook_class.return_value.delete.assert_called_once_with(
+    mock_hook_class.return_value.delete_documents.assert_called_once_with(
         table_name="docs", ids=["d1", "d2"], id_column="id"
     )

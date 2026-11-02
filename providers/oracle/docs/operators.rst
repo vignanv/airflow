@@ -201,6 +201,10 @@ column. It supports ``$eq``, ``$ne``, ``$gt``, ``$lt``, ``$gte``, ``$lte``,
 ``$in``, ``$nin``, ``$exists``, and ``$not``. Combine expressions with
 ``$and``, ``$or``, and ``$nor``.
 
+Range operators (``$gt``, ``$lt``, ``$gte``, ``$lte``, and ``$between``)
+support numeric JSON metadata values. Use the text operators for string values;
+date and datetime metadata comparisons are not currently supported.
+
 .. exampleinclude:: /../../oracle/tests/system/oracle/example_oracle_vector.py
     :language: python
     :dedent: 4

@@ -35,6 +35,7 @@ class FakeCursor:
         self.executed_rows = []
         self.executed_batches = []
         self.rowcount = 0
+        self.rowfactory = None
 
     def __enter__(self):
         return self
@@ -59,7 +60,9 @@ class FakeCursor:
         return self.rows[0] if self.rows else None
 
     def __iter__(self):
-        return iter(self.rows)
+        if self.rowfactory is None:
+            return iter(self.rows)
+        return map(self.rowfactory, self.rows)
 
 
 class FakeConnection:
@@ -463,7 +466,7 @@ def test_delete_executes_delete(monkeypatch):
     conn = FakeConnection(cursor)
     hook = RecordingOracleVectorHook()
     monkeypatch.setattr(hook, "get_conn", lambda: conn)
-    deleted = hook.delete(table_name="docs", ids=["d1", "d2"])
+    deleted = hook.delete_documents(table_name="docs", ids=["d1", "d2"])
     assert deleted == 2
     assert "DELETE FROM" in cursor.sql
     assert len(cursor.executed_batches[0]) == 2

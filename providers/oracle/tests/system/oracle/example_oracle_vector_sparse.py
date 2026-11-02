@@ -112,7 +112,7 @@ def delete_documents() -> None:
     """
     Remove documents created by the system test.
     """
-    OracleVectorHook(oracle_conn_id=ORACLE_CONN_ID).delete(table_name=TABLE_NAME, ids=DOCUMENT_IDS)
+    OracleVectorHook(oracle_conn_id=ORACLE_CONN_ID).delete_documents(table_name=TABLE_NAME, ids=DOCUMENT_IDS)
 
 
 with DAG(

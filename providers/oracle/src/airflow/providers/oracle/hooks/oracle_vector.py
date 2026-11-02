@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, cast
 from uuid import uuid4
 
@@ -74,7 +75,96 @@ class OracleVectorHook(OracleHook):
     """
 
     def __init__(self, *args: Any, oracle_conn_id: str = "oracle_default", **kwargs: Any) -> None:
-        super().__init__(*args, oracle_conn_id=oracle_conn_id, fetch_lobs=True, **kwargs)
+        super().__init__(*args, oracle_conn_id=oracle_conn_id, fetch_lobs=False, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+    def _insert_or_merge_sql(
+        self,
+        *,
+        table_name: str,
+        id_column: str,
+        text_column: str,
+        metadata_column: str,
+        embedding_column: str,
+        mutate_on_duplicate: bool,
+    ) -> str:
+        quoted_table_name = _quote_identifier(table_name, allow_schema=True)
+        quoted_id_column = _quote_identifier(id_column)
+        quoted_text_column = _quote_identifier(text_column)
+        quoted_metadata_column = _quote_identifier(metadata_column)
+        quoted_embedding_column = _quote_identifier(embedding_column)
+        if mutate_on_duplicate:
+            return f"""
+                MERGE INTO {quoted_table_name} tgt
+                USING (
+                    SELECT :id AS id_value, :text AS text_value, :metadata AS metadata_value, :embedding AS embedding_value
+                    FROM dual
+                ) src
+                ON (tgt.{quoted_id_column} = src.id_value)
+                WHEN MATCHED THEN UPDATE SET
+                    tgt.{quoted_text_column} = src.text_value,
+                    tgt.{quoted_metadata_column} = src.metadata_value,
+                    tgt.{quoted_embedding_column} = src.embedding_value
+                WHEN NOT MATCHED THEN INSERT (
+                    {quoted_id_column}, {quoted_text_column}, {quoted_metadata_column}, {quoted_embedding_column}
+                )
+                VALUES (src.id_value, src.text_value, src.metadata_value, src.embedding_value)
+            """
+        return f"""
+            INSERT INTO {quoted_table_name} (
+                {quoted_id_column}, {quoted_text_column}, {quoted_metadata_column}, {quoted_embedding_column}
+            )
+            VALUES (:id, :text, :metadata, :embedding)
+        """
+
+    def _execute_rows(
+        self,
+        sql: str,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        batch_size: int,
+    ) -> int:
+        if not rows:
+            return 0
+        total = 0
+        with self.get_conn() as conn:
+            with conn.cursor() as cursor:
+                for start in range(0, len(rows), batch_size):
+                    batch = list(rows[start : start + batch_size])
+                    cursor.executemany(sql, batch)
+                    if cursor.rowcount > 0:
+                        total += cursor.rowcount
+                    else:
+                        total += len(batch)
+            conn.commit()
+        return total
+
+    def _row_to_result(
+        self,
+        row: Sequence[Any],
+        *,
+        include_score: bool,
+        include_embedding: bool,
+    ) -> OracleVectorSearchResult:
+        idx = 0
+        doc_id = None if row[idx] is None else str(row[idx])
+        idx += 1
+        text = str(row[idx])
+        idx += 1
+        metadata = _coerce_json_dict(row[idx])
+        idx += 1
+        distance = None
+        if include_score:
+            distance = None if row[idx] is None else float(row[idx])
+            idx += 1
+        embedding = None
+        if include_embedding:
+            embedding = row[idx]
+        return OracleVectorSearchResult(
+            id=doc_id, text=text, metadata=metadata, distance=distance, embedding=embedding
+        )
 
     # ------------------------------------------------------------------
     # Table management
@@ -240,7 +330,7 @@ class OracleVectorHook(OracleHook):
             embedding_provider_config=embedding_provider_config,
         )
 
-    def delete(self, *, table_name: str, ids: Sequence[str], id_column: str = "id") -> int:
+    def delete_documents(self, *, table_name: str, ids: Sequence[str], id_column: str = "id") -> int:
         """Delete documents by id and return row count."""
         if not ids:
             return 0
@@ -284,15 +374,64 @@ class OracleVectorHook(OracleHook):
         )
         with self.get_conn() as conn:
             with conn.cursor() as cursor:
+                cursor.rowfactory = partial(
+                    self._row_to_result,
+                    include_score=False,
+                    include_embedding=include_embedding,
+                )
                 cursor.execute(sql, binds)
-                return [
-                    self._row_to_result(row, include_score=False, include_embedding=include_embedding)
-                    for row in cursor
-                ]
+                return list(cursor)
 
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
+    def similarity_search(
+        self,
+        *,
+        table_name: str,
+        query: str,
+        embedding: VectorInput | None = None,
+        embedding_provider_config: dict[str, Any] | None = None,
+        k: int = 4,
+        distance: OracleVectorDistance | str = OracleVectorDistance.EUCLIDEAN,
+        filter: dict[str, Any] | None = None,
+        id_column: str = "id",
+        text_column: str = "text",
+        metadata_column: str = "metadata",
+        embedding_column: str = "embedding",
+        embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
+        include_score: bool = False,
+        include_embedding: bool = False,
+    ) -> list[OracleVectorSearchResult]:
+        """
+        Search by query text when the caller supplies the query embedding.
+
+        DB-side embedding generation is not yet supported, so the caller must provide the embedding used for the search. The
+        query text is retained for API compatibility and logging.
+        """
+        if embedding_provider_config is not None:
+            raise NotImplementedError(
+                "DB-side query embedding generation is not yet supported. "
+                "Pass a client-side query embedding instead."
+            )
+        if embedding is None:
+            raise ValueError("embedding is required for similarity_search")
+        self.log.debug("Running vector search for query text of length %s", len(query or ""))
+        return self.similarity_search_by_vector(
+            table_name=table_name,
+            embedding=embedding,
+            k=k,
+            distance=distance,
+            filter=filter,
+            id_column=id_column,
+            text_column=text_column,
+            metadata_column=metadata_column,
+            embedding_column=embedding_column,
+            embedding_format=embedding_format,
+            include_score=include_score,
+            include_embedding=include_embedding,
+        )
+
     def similarity_search_by_vector(
         self,
         *,
@@ -344,59 +483,14 @@ class OracleVectorHook(OracleHook):
         }
         with self.get_conn() as conn:
             with conn.cursor() as cursor:
+                cursor.rowfactory = partial(
+                    self._row_to_result,
+                    include_score=include_score,
+                    include_embedding=include_embedding,
+                )
                 # self.log.info("Running Oracle vector search SQL:\n%s", sql)
                 cursor.execute(sql, binds)
-                return [
-                    self._row_to_result(row, include_score=include_score, include_embedding=include_embedding)
-                    for row in cursor
-                ]
-
-    def similarity_search(
-        self,
-        *,
-        table_name: str,
-        query: str,
-        embedding: VectorInput | None = None,
-        embedding_provider_config: dict[str, Any] | None = None,
-        k: int = 4,
-        distance: OracleVectorDistance | str = OracleVectorDistance.EUCLIDEAN,
-        filter: dict[str, Any] | None = None,
-        id_column: str = "id",
-        text_column: str = "text",
-        metadata_column: str = "metadata",
-        embedding_column: str = "embedding",
-        embedding_format: OracleVectorFormat | str = OracleVectorFormat.FLOAT32,
-        include_score: bool = False,
-        include_embedding: bool = False,
-    ) -> list[OracleVectorSearchResult]:
-        """
-        Search by query text when the caller supplies the query embedding.
-
-        DB-side embedding generation is not yet supported, so the caller must provide the embedding used for the search. The
-        query text is retained for API compatibility and logging.
-        """
-        if embedding_provider_config is not None:
-            raise NotImplementedError(
-                "DB-side query embedding generation is not yet supported. "
-                "Pass a client-side query embedding instead."
-            )
-        if embedding is None:
-            raise ValueError("embedding is required for similarity_search")
-        self.log.debug("Running vector search for query text of length %s", len(query or ""))
-        return self.similarity_search_by_vector(
-            table_name=table_name,
-            embedding=embedding,
-            k=k,
-            distance=distance,
-            filter=filter,
-            id_column=id_column,
-            text_column=text_column,
-            metadata_column=metadata_column,
-            embedding_column=embedding_column,
-            embedding_format=embedding_format,
-            include_score=include_score,
-            include_embedding=include_embedding,
-        )
+                return list(cursor)
 
     # ------------------------------------------------------------------
     # Index management
@@ -477,92 +571,3 @@ class OracleVectorHook(OracleHook):
 
     def generate_embeddings(self, **_: Any) -> list[list[float]]:
         raise NotImplementedError("DB-side embedding generation is not yet supported")
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-    def _insert_or_merge_sql(
-        self,
-        *,
-        table_name: str,
-        id_column: str,
-        text_column: str,
-        metadata_column: str,
-        embedding_column: str,
-        mutate_on_duplicate: bool,
-    ) -> str:
-        quoted_table_name = _quote_identifier(table_name, allow_schema=True)
-        quoted_id_column = _quote_identifier(id_column)
-        quoted_text_column = _quote_identifier(text_column)
-        quoted_metadata_column = _quote_identifier(metadata_column)
-        quoted_embedding_column = _quote_identifier(embedding_column)
-        if mutate_on_duplicate:
-            return f"""
-                MERGE INTO {quoted_table_name} tgt
-                USING (
-                    SELECT :id AS id_value, :text AS text_value, :metadata AS metadata_value, :embedding AS embedding_value
-                    FROM dual
-                ) src
-                ON (tgt.{quoted_id_column} = src.id_value)
-                WHEN MATCHED THEN UPDATE SET
-                    tgt.{quoted_text_column} = src.text_value,
-                    tgt.{quoted_metadata_column} = src.metadata_value,
-                    tgt.{quoted_embedding_column} = src.embedding_value
-                WHEN NOT MATCHED THEN INSERT (
-                    {quoted_id_column}, {quoted_text_column}, {quoted_metadata_column}, {quoted_embedding_column}
-                )
-                VALUES (src.id_value, src.text_value, src.metadata_value, src.embedding_value)
-            """
-        return f"""
-            INSERT INTO {quoted_table_name} (
-                {quoted_id_column}, {quoted_text_column}, {quoted_metadata_column}, {quoted_embedding_column}
-            )
-            VALUES (:id, :text, :metadata, :embedding)
-        """
-
-    def _execute_rows(
-        self,
-        sql: str,
-        rows: Sequence[Mapping[str, Any]],
-        *,
-        batch_size: int,
-    ) -> int:
-        if not rows:
-            return 0
-        total = 0
-        with self.get_conn() as conn:
-            with conn.cursor() as cursor:
-                for start in range(0, len(rows), batch_size):
-                    batch = list(rows[start : start + batch_size])
-                    cursor.executemany(sql, batch)
-                    if cursor.rowcount > 0:
-                        total += cursor.rowcount
-                    else:
-                        total += len(batch)
-            conn.commit()
-        return total
-
-    def _row_to_result(
-        self,
-        row: Sequence[Any],
-        *,
-        include_score: bool,
-        include_embedding: bool,
-    ) -> OracleVectorSearchResult:
-        idx = 0
-        doc_id = None if row[idx] is None else str(row[idx])
-        idx += 1
-        text = str(row[idx])
-        idx += 1
-        metadata = _coerce_json_dict(row[idx])
-        idx += 1
-        distance = None
-        if include_score:
-            distance = None if row[idx] is None else float(row[idx])
-            idx += 1
-        embedding = None
-        if include_embedding:
-            embedding = row[idx]
-        return OracleVectorSearchResult(
-            id=doc_id, text=text, metadata=metadata, distance=distance, embedding=embedding
-        )

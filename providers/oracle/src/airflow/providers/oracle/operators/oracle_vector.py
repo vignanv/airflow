@@ -309,4 +309,4 @@ class OracleDeleteVectorDocumentsOperator(BaseOperator):
 
     def execute(self, context: Context) -> int:
         hook = OracleVectorHook(oracle_conn_id=self.oracle_conn_id)
-        return hook.delete(table_name=self.table_name, ids=self.ids, id_column=self.id_column)
+        return hook.delete_documents(table_name=self.table_name, ids=self.ids, id_column=self.id_column)
