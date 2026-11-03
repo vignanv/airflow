@@ -47,6 +47,7 @@ class FakeCursor:
         self.sql = sql
         self.binds = binds or {}
         self.executed_rows.append(self.binds)
+        self.rowfactory = None
 
     def executemany(self, sql, rows):
         self.sql = sql
@@ -62,7 +63,7 @@ class FakeCursor:
     def __iter__(self):
         if self.rowfactory is None:
             return iter(self.rows)
-        return map(self.rowfactory, self.rows)
+        return (self.rowfactory(*row) for row in self.rows)
 
 
 class FakeConnection:

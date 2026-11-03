@@ -145,8 +145,7 @@ class OracleVectorHook(OracleHook):
 
     def _row_to_result(
         self,
-        row: Sequence[Any],
-        *,
+        *row: Any,
         include_score: bool,
         include_embedding: bool,
     ) -> OracleVectorSearchResult:
@@ -376,12 +375,12 @@ class OracleVectorHook(OracleHook):
         )
         with self.get_conn() as conn:
             with conn.cursor() as cursor:
+                cursor.execute(sql, binds)
                 cursor.rowfactory = partial(
                     self._row_to_result,
                     include_score=False,
                     include_embedding=include_embedding,
                 )
-                cursor.execute(sql, binds)
                 return list(cursor)
 
     # ------------------------------------------------------------------
@@ -485,13 +484,13 @@ class OracleVectorHook(OracleHook):
         }
         with self.get_conn() as conn:
             with conn.cursor() as cursor:
+                # self.log.info("Running Oracle vector search SQL:\n%s", sql)
+                cursor.execute(sql, binds)
                 cursor.rowfactory = partial(
                     self._row_to_result,
                     include_score=include_score,
                     include_embedding=include_embedding,
                 )
-                # self.log.info("Running Oracle vector search SQL:\n%s", sql)
-                cursor.execute(sql, binds)
                 return list(cursor)
 
     # ------------------------------------------------------------------
